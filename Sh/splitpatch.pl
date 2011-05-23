@@ -29,18 +29,16 @@ sub HandleChunk() {
     my ($File) = @x[$#x];
     #print "*** $Dir $File /// ",
     my ($filename, $directories, $suffix) = fileparse($File, qr/\.[^.]*/);
+    my ($f2, $d2) = fileparse(substr($directories, 0, -1));
+
     $suffix =~ s/^\.//g;
-    if ($filename eq '') {
-      $filename = $suffix;
+    if ($f2 eq '') {
+      $d2 = $suffix;
     }
-    $PatchName =  "$Dir/$filename.patch";
-    while (-e $PatchName) {
-      $Seq++;
-      $PatchName =  "$Dir/$filename${Seq}.patch";
-      # print "  trying $PatchName\n"
-    }
-    print "$directories $PatchName\n";
-    open (Patch, ">$PatchName") || die "Unable to save patch $File\n";
+    $PatchName =  "$Dir/${f2}.patch";
+
+    print "$File -->  $PatchName\n";
+    open (Patch, ">>$PatchName") || die "Unable to save patch $File\n";
     print Patch @Chunk;
     close (Patch);
   }
