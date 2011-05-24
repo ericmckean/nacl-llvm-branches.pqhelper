@@ -83,6 +83,47 @@ sub HgRevertClean() {
   die "Unable to cleanly revert $RepoRoot $Count\n" if ($Count != ($#Files+1));
 }
 
+sub HgRefreshAll {
+  my ($RepoDir) = @_;
+  my ($CMD, $RepoRoot) =  GetRepoRoot($RepoDir);
+  chdir $RepoRoot;
+  open (my $PList, "hg qseries |") || 
+    die "Unable to get qseries in '$RepoRoot'\n";
+  Shell("hg qpop -a");
+  foreach $MqPatch (<$PList>) {
+    chomp $MqPatch;
+    print "Processing $MqPatch\n";
+    Shell("hg qpush $MqPatch");
+    Shell("hg qrefresh");
+  }
+  
+  Shell("hg -R ${RepoRoot}/.hg/patches stat");
+  close $PList;
+}
+
+sub ProcessPatch () {
+  my ($Func, $Arg, @Lines) = (@_);
+  my $Line;
+  my $DiffStart = '';
+  my @Chunk;
+  foreach $Line (@Lines) {
+    if ($Line =~ /^diff /) {
+      $DiffStart = $Line;
+      &HandleChunk($Dir, @Chunk);
+      # clear Chunk out for next bit
+      @Chunk = ();
+    }
+    push @Chunk, $Line;
+  }
+  &$Func($Arg, @Chunk)  if ($#Chunk >= 2);
+}
+
+
+sub StripWhiteSpaceChunks {
+  sub
+}
+
+
 sub HgTrackPatch {
   my ($RepoDir) = @_;
   my ($CMD, $RepoRoot) =  GetRepoRoot($RepoDir);
@@ -105,14 +146,16 @@ closedir $dh;
 print "PatchList $#PatchDir\n";
 chomp($_ = `pwd`);
 
-  if (grep { /^-R$/ } @ARGV) {
+  if (grep { /^-Clean$/ } @ARGV) {
     &HgRevertClean($_);
     &HgRevertClean("$_/.hg/patches");
-  } elsif (grep { /^-I$/ } @ARGV) {
+  } elsif (grep { /^-Init$/ } @ARGV) {
     &InitPatchQueue("-p2 -s", \@PatchList,  $_, "23195", "r124151");
-  } elsif (grep { /^-T/ } @ARGV) {
+  } elsif (grep { /^-Track/ } @ARGV) {
     &HgTrackPatch($_);
+  } elsif (grep { /^-Refresh/ } @ARGV) {
+    &HgRefreshAll($_);
   } else {
-    print "-R (Revert) or -I (Init) or -T (track)\n";
+    print "-Clean (Clean and Revert) or -I (Init) or -T (track) or -R (Refresh)\n";
   }
   

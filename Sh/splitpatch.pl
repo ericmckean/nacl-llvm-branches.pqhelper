@@ -3,23 +3,6 @@
 use File::Basename;
 # look for hg style patches and splits each chunk into a separate patch
 
-sub SplitPatch () {
-  my ($Dir, @Lines) = (@_);
-  my $Line;
-  my $DiffStart = '';
-  my @Chunk;
-  foreach $Line (@Lines) {
-    if ($Line =~ /^diff /) {
-      $DiffStart = $Line;
-      &HandleChunk($Dir, @Chunk);
-      # clear Chunk out for next bit
-      @Chunk = ();
-    }
-    push @Chunk, $Line;
-  }
-  &HandleChunk($Dir, @Chunk)  if ($#Chunk >= 2);
-}
-
 sub HandleChunk() {
   my ($Dir, @Chunk) = (@_);
   my ($Seq) = 0;
