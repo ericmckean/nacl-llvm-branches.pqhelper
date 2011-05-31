@@ -35,6 +35,7 @@ sub HandleChunk() {
     if ($f2 eq '') {
       $d2 = $suffix;
     }
+    $f2 = lc $f2;
     $PatchName =  "$Dir/${f2}.patch";
 
     print "$File -->  $PatchName\n";

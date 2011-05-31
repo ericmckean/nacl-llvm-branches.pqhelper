@@ -28,13 +28,41 @@ sub GetRepoRoot {
   return ($CMD, $Dir);
 }
 
+sub QuoteIt() {
+  my ($Cmd) = (@_);
+  $Cmd =~ s/\n/\\n/g;
+  $Cmd =~ s/\t/\\t/g;
+  return $Cmd;
+}
+
 sub Shell {
-  my ($Cmd) = @_;
+  my ($Cmd, $Comment) = @_;
   my ($CWD) = `pwd`;
   chomp ($CWD);
-  print "In $CWD exec $Cmd\n";
+  # print "# $Comment " if ($Comment ne '');
+  my $Cmd2 = &QuoteIt($Cmd);
+  print "(cd $CWD; $Cmd2)\n";
   system($Cmd) == 0 || 
     die "- $Cmd failed: $?";
+}
+
+sub Piped {
+  my ($Cmd, $Comment) = @_;
+  my ($CWD) = `pwd`;
+  chomp ($CWD);
+  my ($Fh);
+  if ($Cmd !~ /\s\|\s*$/) {
+    $Cmd = "$Cmd | ";
+  }
+  my $Cmd2 = &QuoteIt($Cmd);
+
+  open($Fh, $Cmd) ||
+    die "Unable to execute '$Cmd2' as readpipe\n";
+  print "# PIPE\n";
+  print "(cd $CWD; $Cmd2 )\n";
+  my @List = <$Fh>;
+  close ($Fh);
+  return @List;
 }
 
 
@@ -55,10 +83,10 @@ sub InitPatchQueue() {
   Shell("hg qpop -a");
   {
     chdir ".hg/patches";
-    Shell("hg tag ${TagStr} -r tip");
+    Shell("hg tag -l ${TagStr} -r tip");
     chdir "../..";
   };
-  
+
   foreach $Entry (@{$PatchList}) {
     print "Processing $Entry\n";
     my ($PatchName, $directories) = fileparse($Entry);
@@ -84,14 +112,20 @@ sub HgRevertClean() {
 }
 
 sub HgRefreshAll {
-  my ($RepoDir) = @_;
+  my ($RepoDir, $BaseRevOrTag, $QBaseRev) = @_;
   my ($CMD, $RepoRoot) =  GetRepoRoot($RepoDir);
+
+  if ($BaseRev eq '') {
+    my (%Log) = &GetHgLog('');
+    $BaseRev = $Log{"svn"};
+  }
+  if ($QBaseRev ne '') {
+    Shell("hg -R .hg/patches up -r $QBaseRev");
+  }
+
   chdir $RepoRoot;
-  open (my $PList, "hg qseries |") || 
-    die "Unable to get qseries in '$RepoRoot'\n";
   Shell("hg qpop -a");
-  my (@PatchList) = <$PList>;
-  close $PList;
+  my (@PatchList) = Piped("hg qseries");
   &HgRefreshLoop(@PatchList);
 }
 
@@ -100,6 +134,7 @@ sub HgRefreshLoop() {
   my ($MqPatch);
   
   foreach $MqPatch (@PatchList) {
+    last if ($MqPatch eq "STOP");
     chomp $MqPatch;
     print "Processing $MqPatch\n";
     Shell("hg qpush $MqPatch");
@@ -108,24 +143,53 @@ sub HgRefreshLoop() {
   Shell("hg -R .hg/patches stat");
 }
 
-
 sub HgContinueRefresh {
   ## called when a HgRefreshAll has failed and a manual intervention was required
   ## the repo must be clean, with no orig or reg
-  open (my $PList, "hg qseries |") || 
-    die "Unable to get qseries in '$RepoRoot'\n";
-  my(@MqSeries) = <$PList>;
-  close $PList;
-  
-  open (my $Applied, "hg qapplied |") || 
-    die "Unable to get hg qapplied in '$RepoRoot'\n";
-  my (@MqApplied) = <$Applied>;
+  my(@MqSeries) = Piped("hg qseries");
+  my (@MqApplied) = Piped("hg qapplied");
   map { my($x) = shift @MqSeries;
         $x eq $_ || die "hg qapplied does not look like declared qseries!\n";
       } @MqApplied;
   &HgRefreshLoop(@MqSeries);
 }
 
+sub HgRecordMqRefresh {
+  # To be run after a successful refresh step.
+  # 
+  my ($RepoDir) = (@_);
+  my ($CMD, $RepoRoot) =  &GetRepoRoot($RepoDir);
+  my (@MqApplied) = grep { chomp } Piped("hg qapplied");
+  my $NewBaseRev = -2 - $#MqApplied;
+  my (%RevLog) = GetHgLog('-r $NewBaseRev');
+  
+};
+
+sub GetHgLog {
+  # get important info about the current rev
+  my ($CurrHgRev) = @_;
+  if ($CurrHgRev eq '') {
+    my (@Rev) = grep { chomp; } Piped("hg id -i");
+    $CurrHgRev = shift @Rev;
+  }
+
+  my (@Log) = 
+    Piped("hg log --debug --template='rev:\t\t{rev}:{node|short}\n".
+          "svn:\t\t{svnrev}\n".
+          "branches:\t\t{branches}\ntags:\t\t{tags}\n" .
+          "children:\t{children}\nparents:\t{parents}\n'".
+          " -r ${CurrHgRev}");
+  # print @Log;
+
+  my (%Rtn);
+  foreach (@Log) {
+    $_ =~ /^(\w+):\s+(.*)$/;
+    my $Key = $1;
+    my $Rest = $2;
+    $Rtn{$Key} = $Rest;
+  }
+  return %Rtn;
+}
 
 sub ProcessPatch () {
   # @Chunk (for --unified diffs) has:
@@ -220,9 +284,11 @@ sub SubChunkHasNonBlankDelta() {
 }
 
 sub StripAllWhiteSpace() {
-  my ($DiffLevel, @Chunk) = (@_);
+  my ($Assoc, @Chunk) = (@_);
   my (@SubChunk);
   my (@DstChunk);
+  my ($DiffLevel) = $$Assoc{"DiffLevel"};
+  my ($File) = $$Assoc{"File"};
 
   ($#Chunk >= 2) || die "@Chunk is incomplete";
   push @DstChunk, shift @Chunk;
@@ -241,6 +307,9 @@ sub StripAllWhiteSpace() {
   if ($#SubChunk > 0)  {
     push @DstChunk,  &StripWhiteSpaceChangesInSubChunk($DiffLevel, @SubChunk);
   }
+  
+  open(my $Dst, "> $File") || 
+    die "Unable to create '$File'\n";
   return @DstChunk;
 };
 
@@ -305,19 +374,24 @@ sub HgTrackPatch {
   Shell("hg delete ${\(join(' ', @ToBeDeleted))}") if ($#ToBeDeleted >= 0);
 }
 
-$PatchDir="/tmp/out";
-opendir(my $dh, $PatchDir) || die "can't opendir the patch directory $PatchDir: $!";
-@PatchList = map { $_ = "${PatchDir}/$_" }
-  grep { -f "${PatchDir}/$_" } readdir($dh);
-closedir $dh;
-
-print "PatchList $#PatchDir\n";
 chomp($_ = `pwd`);
 
   if (grep { /^-Clean$/ } @ARGV) {
     &HgRevertClean($_);
     &HgRevertClean("$_/.hg/patches");
   } elsif (grep { /^-Init$/ } @ARGV) {
+#     my (@Args) = grep { !/^-\w+$/ 
+#                       } @ARGV;
+#     my ($PatchDir, $PatchOpts, $Tag, $Rev);
+    
+     $PatchDir="/tmp/out";
+     opendir(my $dh, $PatchDir) || die "can't opendir the patch directory $PatchDir: $!";
+     @PatchList = map { $_ = "${PatchDir}/$_" }
+       grep { -f "${PatchDir}/$_" } readdir($dh);
+     closedir $dh;
+
+#     print "PatchList $#PatchDir\n";
+
     &InitPatchQueue("-p2 -s", \@PatchList,  $_, "23195", "r124151");
   } elsif (grep { /^-Track$/ } @ARGV) {
     &HgTrackPatch($_);
@@ -360,11 +434,36 @@ chomp($_ = `pwd`);
       $Rtn || die "Non-whitespace change in '$FileOrCmd'\n";
     }
   } elsif (grep { /^-StripAllWhiteSpace$/ } @ARGV) {
-    die "not supported yet\n";
+    die "ACk!\n"; 
+  } elsif (grep { /^-Log$/ } @ARGV) {
+    my (@Revs) = grep { /^-r[-\w]+$/ } @ARGV;
+    my (%Rtn);
+
+    if ($#Revs >= 0) {
+      foreach (@Revs) {
+        $_ = substr($_,2);
+        print "Trying REV $_\n";
+        %Rtn = &GetHgLog($_);
+        foreach $Key (qw(rev children parents svn tags branches)) {
+          write;
+        }
+      }
+    } else {
+      %Rtn = &GetHgLog('');
+      foreach $Key (qw(rev children parents svn tags branches)) {
+        write;
+      }
+    }
+    format =
+@<<<<<<<<<<<<@<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+$Key, $Rtn{$Key}
+.
   } else {
     print "-Clean (Clean and Revert) or -I (Init) or -T (track) or -Refresh\n";
     print "-Track\n";
     print "-Refresh\n";
+    print "-Log (-rREV)\n";
+    print "-Clean -- be careful of files hidden from view via .hgignore\n";
     print "-DelWhiteSpace PatchFiles... safely removes all diff subchunks with only whitespace changes\n";
     print "-VerifyDiffIsWhite {DiffLevel} PatchesOrCommands)... \n";
     print "  Optional DiffLevel argument:\n";
@@ -373,8 +472,10 @@ chomp($_ = `pwd`);
     print "  DiffLevel > 1 is necessary to discern what happens if your change is to a patch file.";
     print "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n";
     print "  For example: -VerifyDiffIsWhite -d2 'diff -u A.patch B.patch'";
-    print "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '
+    print "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
     print "-StripAllWhiteSpace\n";
     print "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n";
     print "  with real diffs. Uses the DiffLevel argument\n";
   }
+
+## first bad revision 23197
