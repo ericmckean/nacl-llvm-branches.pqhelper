@@ -39,7 +39,7 @@ sub Shell {
   my ($Cmd, $Comment) = @_;
   my ($CWD) = `pwd`;
   chomp ($CWD);
-  # print "# $Comment " if ($Comment ne '');
+  print "# $Comment " if ($Comment ne '');
   my $Cmd2 = &QuoteIt($Cmd);
   print "(cd $CWD; $Cmd2)\n";
   system($Cmd) == 0 || 
@@ -79,20 +79,20 @@ sub InitPatchQueue() {
   &HgRevertClean($RepoRoot);
   system("hg up -r $BaseRev") == 0 ||
     die "Unable to update Repo $RepoRoot to rev '$BaseRev'\n";
-  Shell("hg qinit -c") if (! -d ".hg/patches/.hg");
-  Shell("hg qpop -a");
+  Shell("hg qinit -c", "") if (! -d ".hg/patches/.hg");
+  Shell("hg qpop -a", "");
   {
     chdir ".hg/patches";
-    Shell("hg tag -l ${TagStr} -r tip");
+    Shell("hg tag -l ${TagStr} -r tip", "");
     chdir "../..";
   };
 
   foreach $Entry (@{$PatchList}) {
     print "Processing $Entry\n";
     my ($PatchName, $directories) = fileparse($Entry);
-    Shell("patch ${PatchOptions} < ${Entry}");
+    Shell("patch ${PatchOptions} < ${Entry}", "");
     &HgTrackPatch($RepoRoot);
-    Shell("hg qnew -f ${PatchName}");
+    Shell("hg qnew -f ${PatchName}", "");
   }
   
   print "Done importing patches. " .
@@ -104,7 +104,7 @@ sub HgRevertClean() {
   my ($CMD, $RepoRoot) =  GetRepoRoot($RepoDir);
   chdir $RepoRoot;
   die "$RepoRoot is not a hg repo\n" if ("hg" ne $CMD);
-  Shell("hg revert -a .");
+  Shell("hg revert -a .", "");
   my (@Files) = map { chomp; $_ = substr($_,2) } grep { /^?/ } `hg stat -u`;
   print "Removing:\n\t", join("\n\t", @Files), "\n" if ($#Files >= 0);
   my ($Count) = unlink @Files;
@@ -112,20 +112,20 @@ sub HgRevertClean() {
 }
 
 sub HgRefreshAll {
-  my ($RepoDir, $BaseRevOrTag, $QBaseRev) = @_;
+  my ($RepoDir, $BaseRev, $QBaseRev) = @_;
   my ($CMD, $RepoRoot) =  GetRepoRoot($RepoDir);
-
+  
   if ($BaseRev eq '') {
     my (%Log) = &GetHgLog('');
     $BaseRev = $Log{"svn"};
   }
   if ($QBaseRev ne '') {
-    Shell("hg -R .hg/patches up -r $QBaseRev");
+    Shell("hg -R .hg/patches up -r $QBaseRev", "");
   }
 
   chdir $RepoRoot;
-  Shell("hg qpop -a");
-  my (@PatchList) = Piped("hg qseries");
+  Shell("hg qpop -a", "");
+  my (@PatchList) = Piped("hg qseries", "");
   &HgRefreshLoop(@PatchList);
 }
 
@@ -137,10 +137,10 @@ sub HgRefreshLoop() {
     last if ($MqPatch eq "STOP");
     chomp $MqPatch;
     print "Processing $MqPatch\n";
-    Shell("hg qpush $MqPatch");
-    Shell("hg qrefresh");
+    Shell("hg qpush $MqPatch", "", "");
+    Shell("hg qrefresh", "", "");
   }
-  Shell("hg -R .hg/patches stat");
+  Shell("hg -R .hg/patches stat", "", "");
 }
 
 sub HgContinueRefresh {
@@ -154,15 +154,24 @@ sub HgContinueRefresh {
   &HgRefreshLoop(@MqSeries);
 }
 
-sub HgRecordMqRefresh {
+sub HgCommitMqRefresh {
   # To be run after a successful refresh step.
-  # 
-  my ($RepoDir) = (@_);
+  # Pre: all patches are already pushed and refreshed
+
+  my ($RepoDir, $BaseRev) = (@_);
   my ($CMD, $RepoRoot) =  &GetRepoRoot($RepoDir);
-  my (@MqApplied) = grep { chomp } Piped("hg qapplied");
-  my $NewBaseRev = -2 - $#MqApplied;
-  my (%RevLog) = GetHgLog('-r $NewBaseRev');
-  
+
+  my (%RevLog) = GetHgLog($BaseRev);
+  print "Commiting Rebase to the following version\n";
+  write();
+  my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a");
+  if (grep { /^svn${RevLog{svn}}\S/x } @AllBranches) {
+    print "Branch svn${RevLog{svn}} exists\n";
+  } else {
+    print "Creating new branch svn${RevLog{svn}}\n";
+    Shell("hg -R .hg/patches branch svn${RevLog{svn}}", "", "");
+  }
+  Shell("hg commit", "", "");
 };
 
 sub GetHgLog {
@@ -170,7 +179,7 @@ sub GetHgLog {
   my ($CurrHgRev) = @_;
   if ($CurrHgRev eq '') {
     my (@Rev) = grep { chomp; } Piped("hg id -i");
-    $CurrHgRev = shift @Rev;
+    $CurrHgRev =  shift @Rev;
   }
 
   my (@Log) = 
@@ -370,8 +379,8 @@ sub HgTrackPatch {
   my (@ToBeAdded) = map { chomp; $_ = substr($_, 2) }
     grep { !/(orig|rej)$/ }
     grep { /^\?/ } @Files;
-  Shell("hg add ${\(join(' ', @ToBeAdded))}") if ($#ToBeAdded >= 0);
-  Shell("hg delete ${\(join(' ', @ToBeDeleted))}") if ($#ToBeDeleted >= 0);
+  Shell("hg add ${\(join(' ', @ToBeAdded))}", "") if ($#ToBeAdded >= 0);
+  Shell("hg delete ${\(join(' ', @ToBeDeleted))}", "") if ($#ToBeDeleted >= 0);
 }
 
 chomp($_ = `pwd`);
@@ -397,6 +406,14 @@ chomp($_ = `pwd`);
     &HgTrackPatch($_);
   } elsif (grep { /^-Refresh$/ } @ARGV) {
     &HgRefreshAll($_);
+  } elsif (grep { /^-ContinueRefresh$/ } @ARGV) {
+    &HgContinueRefresh($_);
+  } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
+    my (@Revs) = grep { chomp } grep { /^-r\S+$/ } @ARGV;    
+    if ($#Revs >= 0 && length($Revs[-1]) > 2) {
+      my ($Rev) = substr($Revs[-1], 2);
+      &HgCommitMqRefresh($_, $Rev);
+    }
   } elsif (grep { /^-DelWhiteSpace$/ } @ARGV) {
     my (@Patches) = grep { !/^-\w*$/ } @ARGV;
     print "Processing:\n\t", join("\n\t",@Patches), "\n" if ($#Patches >= 0);
@@ -425,7 +442,7 @@ chomp($_ = `pwd`);
         open ($Fh, "$FileOrCmd") || 
           die "Unable to open patch '$FileOrCmd' for reading $?\n";
       } else {
-        open($Fh, "$FileOrCmd | ") || 
+        open($Fh, "$FileOrCmd | ") ||
           die "Unable to open command '$FileOrCmd |' for reading $?\n";
       }
       @Lines = <$Fh>;
@@ -436,14 +453,14 @@ chomp($_ = `pwd`);
   } elsif (grep { /^-StripAllWhiteSpace$/ } @ARGV) {
     die "ACk!\n"; 
   } elsif (grep { /^-Log$/ } @ARGV) {
-    my (@Revs) = grep { /^-r[-\w]+$/ } @ARGV;
+    my (@Revs) = grep { /^-r\S+$/ } @ARGV;
     my (%Rtn);
 
     if ($#Revs >= 0) {
       foreach (@Revs) {
         $_ = substr($_,2);
         print "Trying REV $_\n";
-        %Rtn = &GetHgLog($_);
+        %Rtn = &GetHgLog("'$_'");
         foreach $Key (qw(rev children parents svn tags branches)) {
           write;
         }
@@ -461,21 +478,27 @@ $Key, $Rtn{$Key}
   } else {
     print "-Clean (Clean and Revert) or -I (Init) or -T (track) or -Refresh\n";
     print "-Track\n";
-    print "-Refresh\n";
+    print "-Refresh\n" .
+      "  attempts to start a new rebase operation on the current revision\n";
+    print "-ContinueRefresh\n" .
+      " Attempts to continue the refresh operation\n"
+    print "-CommitRefresh\n" .
+      "
+
     print "-Log (-rREV)\n";
     print "-Clean -- be careful of files hidden from view via .hgignore\n";
     print "-DelWhiteSpace PatchFiles... safely removes all diff subchunks with only whitespace changes\n";
-    print "-VerifyDiffIsWhite {DiffLevel} PatchesOrCommands)... \n";
-    print "  Optional DiffLevel argument:\n";
-    print "  DiffLevel is -d1 (default), -d2, -d3 ... \n";
-    print "  where 1 is a single diff, 2 is a diff of a diff, 3 is a diff or a diff of a diff..\n";
-    print "  DiffLevel > 1 is necessary to discern what happens if your change is to a patch file.";
-    print "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n";
-    print "  For example: -VerifyDiffIsWhite -d2 'diff -u A.patch B.patch'";
-    print "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
-    print "-StripAllWhiteSpace\n";
-    print "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n";
-    print "  with real diffs. Uses the DiffLevel argument\n";
+    print "-VerifyDiffIsWhite {DiffLevel} PatchesOrCommands)... \n" .
+     "  Optional DiffLevel argument:\n" . 
+     "  DiffLevel is -d1 (default), -d2, -d3 ... \n" .
+     "  where 1 is a single diff, 2 is a diff of a diff, 3 is a diff or a diff of a diff..\n" .
+     "  DiffLevel > 1 is necessary to discern what happens if your change is to a patch file." .
+     "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n" .
+     "  For example: -VerifyDiffIsWhite -d2 'diff -u A.patch B.patch'" .
+     "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
+    print "-StripAllWhiteSpace\n" .
+     "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
+     "  with real diffs. Uses the DiffLevel argument\n";
   }
 
 ## first bad revision 23197
