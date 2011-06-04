@@ -42,7 +42,6 @@ sub ArgvHasFlag {
 
 sub ArgvHasOpt {
   #1. for -Option R
-
   #2. for -Option=R
   #3. for -OptionR
   my ($flag) = @_;
@@ -135,6 +134,22 @@ sub Piped {
   return @List;
 }
 
+sub Piped2 {
+  my ($Comment, @Cmd) = @_;
+  my ($CWD) = `pwd`;
+  chomp ($CWD);
+  my ($Fh);
+  my $Cmd2 = &QuoteIt(join(" ", @Cmd));
+
+  open($Fh, "-|", @Cmd) ||
+    die "Unable to execute '$Cmd2' as readpipe\n";
+  print "# PIPE ";
+  print "$Comment " if ($Comment ne '');
+  print "(cd $CWD; $Cmd2 )\n";
+  my @List = <$Fh>;
+  close ($Fh);
+  return @List;
+}
 sub MergePatchHeader {
   my ($Src, $Dst, $PatchName) = @_;
 
@@ -177,11 +192,13 @@ sub GetHgLog {
     $CurrHgRev =~ s/\+$//g; ## kill any trailing '+'
   }
   my (@Log) = 
-    Piped("hg log --debug --template='rev:\t\t{rev}:{node}\n".
-          "svn:\t\t{svnrev}\n".
-          "branches:\t\t{branches}\ntags:\t\t{tags}\n" .
-          "children:\t{children}\nparents:\t{parents}\n'".
-          " -r ${CurrHgRev}", "Getting Log info for '$CurrHgRev'");
+    Piped2("Getting Log info for '$CurrHgRev'",
+           ("hg", "log", 
+            "--debug", "--template=rev:\t\t{rev}:{node}\n".
+            "svn:\t\t{svnrev}\n".
+            "branches:\t\t{branches}\ntags:\t\t{tags}\n" .
+            "children:\t{children}\nparents:\t{parents}\n",
+            "-r", ${CurrHgRev}));
   # print @Log;
 
   my (%Rtn);
@@ -202,7 +219,14 @@ sub WriteLog {
 @<<<<<<<<<<<<@<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 $Key, ${$Rtn}{$Key}
 .
-  
+  my (@keys) = (qw(rev children parents svn tags branches));
+  # last line of defense
+  foreach (@keys) {
+    die "Something went wrong with quering the repository\n" 
+      if (! exists ${$Rtn}{$_});;
+  }
+
+
   foreach $Key (qw(rev children parents svn tags branches)) {
     write;
   }

@@ -290,7 +290,7 @@ sub HgRefreshAll {
   chdir $RepoRoot;
   Shell("hg qpop -a", "");
   my (@PatchList) = Piped("hg qseries", "");
-  &HgRefreshLoop(@PatchList);
+  &HgRefreshLoop(grep { chomp } @PatchList);
 }
 
 sub HgRefreshLoop() {
@@ -330,14 +330,14 @@ sub HgPushLoop() {
     print "Processing $MqPatch\n";
     Shell("hg qpush $MqPatch", "", "");
   }
-  Shell("hg -R .hg/patches stat", "", "");
+  Shell("hg -R .hg/patches stat", "");
 }
 
 sub HgContinueRefresh {
   ## called when a HgRefreshAll has failed and a manual intervention was required
   ## the repo must be clean, esp without any .orig or -rej files
-  my(@MqSeries) = Piped("hg qseries");
-  my (@MqApplied) = Piped("hg qapplied");
+  my(@MqSeries) = grep { chomp } Piped("hg qseries");
+  my (@MqApplied) = grep { chomp } Piped("hg qapplied");
   map { my($x) = shift @MqSeries;
         $x eq $_ || die "hg qapplied does not look like declared qseries!\n";
       } @MqApplied;
@@ -350,19 +350,31 @@ sub HgCommitMqRefresh {
 
   my ($RepoDir, $BaseRev) = (@_);
   my ($CMD, $RepoRoot) =  &GetRepoRoot($RepoDir);
-
-  my (%RevLog) = GetHgLog($BaseRev);
+  print "Attemting to commit the following changes";
+  Shell("hg stat", "Main Repo Status");
+  Shell("hg -R .hg/patches stat", "Patch Repo Status");
+  my (%RevLog) = &GetHgLog($BaseRev);
   print "Commiting Rebase to the following version\n";
   &WriteLog(\ %RevLog);
+  print "Are you sure you are merging for '$BaseRev'? :";
+  $_ = <STDIN>;
+  die "Ok, aborting\n" if (! /y(e(s)?)?/i );
+  print "Double checking to make sure you aren't mistaken\n";
+  my (@MqSeries) = grep { chomp } Shell("hg qapplied");
+  Shell("hg qpop -a", "Double check");
+  my (%ActualRevB4Patch) = &GetHgLog('');
+  die "You LIE! Revs don't match -- its actually ${ActualRevB4Patch}{rev}\n"
+    if ($ActualRevB4Patch{"rev"} ne $RevLog{"rev"});
+  &HgPushLoop(@MqSeries);
 
   my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a");
-  if (grep { /^svn${RevLog{svn}}\S/x } @AllBranches) {
+  if (grep { /^svn${RevLog{svn}}\s/x } @AllBranches) {
     print "Branch svn${RevLog{svn}} already exists\n";
   } else {
     print "Creating new branch svn${RevLog{svn}}\n";
     Shell("hg -R .hg/patches branch svn${RevLog{svn}}", "", "");
   }
-  Shell("hg commit", "", "");
+  Shell("hg commit -R .hg/patches", "COMMIT THE BRANCH");
 };
 
 
@@ -616,13 +628,9 @@ chomp($_ = `pwd`);
   } elsif (grep { /^-ContinueRefresh$/ } @ARGV) {
     &HgContinueRefresh($_);
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
-    my (@Revs) = grep { chomp } &ArgvHasOpt('-r');
     my ($Rev);
-    if (&ArgvHasUniqueOpt('-r', \$Rev)) {
-      &HgCommitMqRefresh($_, $Rev);
-    } else {
-      print "need a revision via -r\n"
-    }
+    &ArgvHasUniqueOpt('-r', \$Rev) || die "requries -r REV\n";
+    &HgCommitMqRefresh($_, $Rev);
   } elsif (grep { /^-DelWhiteSpace$/ } @ARGV) {
     my (@Patches) = grep { !/^-\w*$/ } @ARGV;
     print "Processing:\n\t", join("\n\t",@Patches), "\n" if ($#Patches >= 0);
@@ -666,7 +674,7 @@ chomp($_ = `pwd`);
       foreach (@Revs) {
         ##$_ = substr($_,2);
         print "Trying REV $_\n";
-        %Rtn = &GetHgLog("'$_'");
+        %Rtn = &GetHgLog($_);
         &WriteLog(\ %Rtn);
       }
     } else {
@@ -678,7 +686,7 @@ chomp($_ = `pwd`);
     print "-InitFromHgExport\n" .
       "  Requires the following Arguments\n" . 
       "   -SrcRepo=DIR - directory of the repo to pull from (defaults to cwd)\n" .
-      "   -PatchArg=CMD - (defaults to '-p2 -s')\n" . 
+      "   -PatchOptions=CMD - (defaults to '-p2 -s')\n" . 
       "   -BaseRev=REV  - base revision to start extracting patches from \n" .
       "   -EndRev=REV   - last revision to pull \n" .
       "   -DstRepo=DIR \n" . 
