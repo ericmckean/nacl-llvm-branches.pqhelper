@@ -136,7 +136,7 @@ sub InitPatchQueueFromHgExport {
     } elsif ($FirstParent eq ${$Parents}[1]) {
       $tweak = '--switch-parent';
     } else {
-      die "-FirstParent=${FirstParent} does not match any parent of $FirstRev{rev}\n";
+      die "-FirstParent=${FirstParent} does not match any parent of ${$FirstRev}{rev}\n";
     }
   }
   
@@ -379,6 +379,7 @@ sub HgCommitMqRefresh {
 
 sub ProcessPatch () {
   # @Chunk (for --unified diffs) has:
+  # comments
   # diff ...
   # --- ...
   # +++ ...
@@ -389,7 +390,8 @@ sub ProcessPatch () {
   my $Line;
   my $DiffStart = '';
   my @Chunk;
-  my @Rtn;
+  my (@Rtn);
+
   foreach $Line (@Lines) {
     if ($Line =~ /^diff /) {
       $DiffStart = $Line;
@@ -425,9 +427,7 @@ sub StripWhiteSpace {
   if ( ($#SubChunk > 0) && &SubChunkHasNonBlankDelta(1, @SubChunk)) {
     push @DstChunk, @SubChunk;
   }
-  if ($FH ne '') {
-    print $FH @DstChunk if ($#DstChunk > 2);
-  }
+  print $FH @DstChunk if ($#DstChunk > 2 && $FH ne '');
   return @DstChunk;
 }
 
@@ -475,11 +475,10 @@ sub SubChunkHasNonBlankDelta() {
 }
 
 sub StripAllWhiteSpace() {
-  my ($Assoc, @Chunk) = (@_);
+  my ($File, @Chunk) = (@_);
   my (@SubChunk);
   my (@DstChunk);
   my ($DiffLevel) = $$Assoc{"DiffLevel"};
-  my ($File) = $$Assoc{"File"};
 
   ($#Chunk >= 2) || die "@Chunk is incomplete";
   push @DstChunk, shift @Chunk;
@@ -498,10 +497,9 @@ sub StripAllWhiteSpace() {
   if ($#SubChunk > 2)  {
     push @DstChunk,  &StripWhiteSpaceChangesInSubChunk($DiffLevel, @SubChunk);
   }
-  
-  if ($File ne '') {
-    print $File @DstChunk;
-  }
+
+  print $File @DstChunk if ($#DstChunk > 2 && $File ne '') ;
+
   return @DstChunk;
 };
 
@@ -535,32 +533,48 @@ sub StripWhiteSpaceChangesInSubChunk() {
     }
     print "\n\n\nNow trying to reset all isolated whitespace changes\n";
   }
-  my $i = 1;
+  my ($i,$safe,$j) = (1,0,0);
+  my @safelines;
   while ($i <= $#SubChunk) {
-    my ($Line) = $SubChunk[$i];
-    if (($Types[$i] eq 'w') && 
-        (($Types[$i-1] eq 'c') || ($Types[$i-1] eq 'w')) &&
-        (($i == $#SubChunk) || (($Types[$i+1] eq 'c') || ($Types[$i+1] eq 'w')))) {
-      if (substr($Line,0,1) eq '-') {
-        $Types[$i] = 'c';
-        # only thing that needs to happen is to get rid of the '-' and turn it
-        # into a context line
-        $SubChunk[$i] = " " . substr($Line,1);
-        $i++;
-      } elsif (substr($Line,0,1) eq '+') {
-        splice(@Types, $i, 1);
-        splice(@SubChunk, $i, 1);
-      }
-    } else {
-      $i++;
+    if ($Types[$i] eq 'c') {
+      $safe = 1; next;
+    } elsif ($Types[$i] eq 'x') {
+      $safe = 0; next;
     }
+    if (($Types[$i] eq 'w') && $safe) {
+      # scan forward and see if the whitespace run remains safe.
+      $j = $i+1 if ($j < $#SubChunk);
+      while ($safe && ($j <= $#SubChunk)) {
+        last if ($Types[$j] eq 'c');
+        if ($Types[$j] eq 'w') {
+          next;
+        }
+        $safe = 0;
+        $i = $j+1;
+      } continue {  $j++;  }
 
-    if (0) {
-      foreach (0 .. $#SubChunk) {
-        print "$Types[$_]: ", $SubChunk[$_];
+      if ($safe) {
+        while ($i <= $j) {
+          my ($Line) = $SubChunk[$i];
+          if (substr($Line,0,1) eq '-') {
+            $Types[$i] = 'c';
+            # only thing that needs to happen is to get rid of the '-' and turn it
+            # into a context line
+            $SubChunk[$i] = " " . substr($Line,1);
+          } elsif (substr($Line,0,1) eq '+') {
+            splice(@Types, $i, 1);
+            splice(@SubChunk, $i, 1);
+            $j--; $i--;
+          }
+        } continue { $i++; }
       }
-      print "\n";
     }
+  } continue { $i++; }
+  if (0) {
+    foreach (0 .. $#SubChunk) {
+      print "$Types[$_]: ", $SubChunk[$_];
+    }
+    print "\n";
   }
   return @SubChunk;
 }
@@ -587,7 +601,7 @@ chomp($_ = `pwd`);
     
     my ($PatchOptions, $PatchDir, $RepoDir, $BaseRev, $Where);
     
-    my $PatchDir="/tmp/patches";
+    $PatchDir="/tmp/patches";
     &ArgvHasUniqueOpt('-PatchDir', \$PatchDir);
 
     opendir(my $dh, $PatchDir) || die "can't opendir the patch directory $PatchDir: (use -PatchDir DIR) $!";
@@ -660,6 +674,22 @@ chomp($_ = `pwd`);
         die "Unable to open ${File}.stripped for writing\n";
       &ProcessPatch(\&StripWhiteSpace, $DstFh, @Lines);
       close $DstFh;
+      &MergePatchHeader($File, "${File}.stripped", "${File}.stripped");
+    }
+  } elsif (grep { /^-StripAllWhiteSpace$/ } @ARGV) {
+    my (@Patches) = grep { !/^-\w+/ } @ARGV;
+
+    print "Processing:\n\t", join("\n\t",@Patches), "\n" if ($#Patches >= 0);
+    for $File (@Patches) {
+      open (my $Fh, "$File") || die "Unable to open patch '$File' for reading\n";
+      my (@Lines) = <$Fh>;
+      close $Fh;
+      open ($Fh, ">${File}.stripped") || die "Unable to create '${File}.stripped'\n";
+      &ProcessPatch(\&StripWhiteSpace, $Fh,
+                    &ProcessPatch(\&StripAllWhiteSpace, '', @Lines));
+      close($Fh);
+      &MergePatchHeader($File, "${File}.stripped", "${File}.stripped");
+      
     }
   } elsif (grep { /^-VerifyDiffIsWhite$/ } @ARGV) {
     my($DiffLevel) = 1;
@@ -681,24 +711,6 @@ chomp($_ = `pwd`);
       close ($Fh);
       $Rtn &= &ProcessPatch(\&VerifyDiffIsWhite, $DiffLevel, @Lines);
       $Rtn || die "Non-whitespace change in '$FileOrCmd'\n";
-    }
-  } elsif (grep { /^-StripAllWhiteSpace$/ } @ARGV) {
-    my (@Patches) = grep { !/^-\w+/ } @ARGV;
-    my($DiffLevel) = 1; my ($File);
-    &ArgvHasUniqueOpt('-DiffLevel', \$DiffLevel);
-
-    print "Processing:\n\t", join("\n\t",@Patches), "\n" if ($#Patches >= 0);
-    for $File (@Patches) {
-      open (my $Fh, "$File") || die "Unable to open patch '$File' for reading\n";
-      my (@Lines) = <$Fh>;
-      close $Fh;
-      my %Assoc;
-      $Assoc{"DiffLevel"}=$DiffLevel;
-      open ($Fh, ">${File}.stripped") || die "Unable to create '${File}.stripped'\n";
-      $Assoc{"File"}=$Fh;
-      &ProcessPatch(\&StripAllWhiteSpace, \%Assoc, 
-                    &ProcessPatch(\&StripWhiteSpace, '', @Lines));
-      close($Fh);
     }
   } elsif (grep { /^-Log$/ } @ARGV) {
     my (@Revs) = &ArgvHasOpt('-r');
@@ -749,9 +761,9 @@ chomp($_ = `pwd`);
      "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n" .
      "  For example: -VerifyDiffIsWhite -DiffLevel=2 'diff -u A.patch B.patch'" .
      "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
-    #print "-StripAllWhiteSpace\n" .
-    # "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
-    # "  with real diffs. Uses the DiffLevel argument\n";
+    print "-StripAllWhiteSpace\n" .
+     "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
+     "  with real diffs. Uses the DiffLevel argument\n";
   }
 
 ## first bad revision 23197
