@@ -32,11 +32,6 @@ sub InitPatchQueue() {
   my (@MqApplied) = Piped("hg qapplied");
 
   Shell("hg qpop -a", "");
-#   {
-#     chdir ".hg/patches";
-#     Shell("hg tag -l ${TagStr} -r tip", "");
-#     chdir "../..";
-#   };
   
   if ($Where eq "-FromStart") {
     # do nothing. 
@@ -63,9 +58,9 @@ sub InitPatchQueue() {
     &Shell("hg qpush", "push the laast patch");
     &Shell("hg qrefresh", "refresh the last patch");
   }
-  
+  &TagRepo($RepoRoot, $BaseRev, "InitialImport");
   print "Done importing patches. " .
-    "Examine the state of the repo and Execute -I2\n";
+    "Examine the state of the repo and -CommitRefresh\n";
 }
 
 sub InitPatchQueueFromHgExport {
@@ -310,7 +305,23 @@ sub HgRefreshLoop() {
     Shell("hg qpush $MqPatch", "", "");
     Shell("hg qrefresh", "", "");
   }
-  Shell("hg -R .hg/patches stat", "", "");
+  &TagRepo('', '', "RefreshSuccess");
+  Shell("hg -R .hg/patches stat", "");
+  print "Refresh Successful\n";
+}
+
+sub TagRepo {
+  my ($RepoRoot, $BaseRev, $Tag) = @_;
+  chomp($RepoRoot = `pwd`) if ($RepoRoot eq '');
+  chdir $RepoRoot;
+  print "Tag the repo with $Tag ? ";
+  my $ans = <STDIN>;
+  if ($ans =~ /y(e(s)?)?/i) {
+    Shell("hg qpop -a");
+    my (%Log) = &GetHgLog($BasRev);
+    my ($RevName) = &GetRevName(%Log);
+    Shell("hg tag -l -r $Log{rev} ${RevName}${Tag}");
+  }
 }
 
 sub HgPushLoop() {
@@ -365,13 +376,13 @@ sub HgCommitMqRefresh {
   die "You LIE! Revs don't match -- its actually ${ActualRevB4Patch}{rev}\n"
     if ($ActualRevB4Patch{"rev"} ne $RevLog{"rev"});
   &HgPushLoop(@MqSeries);
-
+  my ($RevName) = &GetRevName(%RevLog);
   my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a");
-  if (grep { /^svn${RevLog{svn}}\s/x } @AllBranches) {
-    print "Branch svn${RevLog{svn}} already exists\n";
+  if (grep { /^${RevName}\s/x } @AllBranches) {
+    print "Branch $RevName already exists\n";
   } else {
-    print "Creating new branch svn${RevLog{svn}}\n";
-    Shell("hg -R .hg/patches branch svn${RevLog{svn}}", "", "");
+    print "Creating new branch $RevName\n";
+    Shell("hg -R .hg/patches branch $RevName", "");
   }
   Shell("hg commit -R .hg/patches", "COMMIT THE BRANCH");
 };
@@ -601,8 +612,9 @@ chomp($_ = `pwd`);
     
     my ($PatchOptions, $PatchDir, $RepoDir, $BaseRev, $Where);
     
-    $PatchDir="/tmp/patches";
-    &ArgvHasUniqueOpt('-PatchDir', \$PatchDir);
+
+    &ArgvHasUniqueOpt('-PatchDir', \$PatchDir) ||
+      die "Requires $PatchDir\n";
 
     opendir(my $dh, $PatchDir) || die "can't opendir the patch directory $PatchDir: (use -PatchDir DIR) $!";
     @PatchList = sort map { $_ = "${PatchDir}/$_" }
@@ -661,7 +673,7 @@ chomp($_ = `pwd`);
     &HgContinueRefresh($_);
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
     my ($Rev);
-    &ArgvHasUniqueOpt('-r', \$Rev) || die "requries -r REV\n";
+    &ArgvHasUniqueOpt('-BaseRev', \$Rev) || die "requries -BaseRev REV\n";
     &HgCommitMqRefresh($_, $Rev);
   } elsif (grep { /^-DelWhiteSpace$/ } @ARGV) {
     my (@Patches) = grep { !/^-\w*$/ } @ARGV;
@@ -748,7 +760,7 @@ chomp($_ = `pwd`);
     print "-ContinueRefresh\n" .
       " Attempts to continue the refresh operation\n";
     print "-CommitRefresh\n" .
-      "  \n";
+      "  -BaseRev=REV\n";
 
     print "-Log (-rREV)\n";
     print "-Clean -- be careful of files hidden from view via .hgignore\n";

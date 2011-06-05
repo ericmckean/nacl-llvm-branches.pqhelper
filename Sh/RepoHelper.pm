@@ -22,7 +22,7 @@ BEGIN {
   @ISA         = qw(Exporter);
   @EXPORT      = qw(&GetRepoRoot &QuoteIt &Shell &Piped &GetHgLog 
                     &SaveTestArtifacts &WriteLog 
-                    &MergePatchHeader
+                    &MergePatchHeader &GetRevName
                     &ArgvHasFlag &ArgvHasOpt &ArgvHasUniqueOpt);
   %EXPORT_TAGS = ( );           # eg: TAG => [ qw!name1 name2! ],
 
@@ -232,6 +232,22 @@ $Key, ${$Rtn}{$Key}
   }
 }
 
+sub GetRevName {
+  my (%Log) = @_;
+  my ($Rtn) = '';
+  my (@tmp);
+
+  if ($Log{svn} ne '') {
+    $Rtn = "svn${Log{svn}}";
+  } elsif (@tmp = split($Log{tags})) {
+    $Rtn = "tag$tmp[0]";
+  } else {
+    # worst case - use the short id
+    @tmp = split(/:/, $Log{rev});
+    $Rtn = "rev$tmp[0]";
+  }
+  return $Rtn;
+}
 
 sub SaveTestArtifacts() {
   my($VersionTag, $DstDir, @Dirs) = (@_);
