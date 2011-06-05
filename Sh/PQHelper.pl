@@ -313,7 +313,6 @@ sub HgRefreshLoop() {
   Shell("hg -R .hg/patches stat", "", "");
 }
 
-
 sub HgPushLoop() {
   my (@PatchList) = @_;
   my ($MqPatch);
@@ -390,16 +389,18 @@ sub ProcessPatch () {
   my $Line;
   my $DiffStart = '';
   my @Chunk;
+  my @Rtn;
   foreach $Line (@Lines) {
     if ($Line =~ /^diff /) {
       $DiffStart = $Line;
-      &$Func($Arg, @Chunk) if ($#Chunk > 0);
+      push @Rtn, &$Func($Arg, @Chunk) if ($#Chunk > 0);
       # clear Chunk out for next bit
       @Chunk = ();
     }
     push @Chunk, $Line;
   }
-  &$Func($Arg, @Chunk)  if ($#Chunk >= 2);
+  push @Rtn, &$Func($Arg, @Chunk)  if ($#Chunk >= 2);
+  return @Rtn;
 }
 
 
@@ -424,7 +425,10 @@ sub StripWhiteSpace {
   if ( ($#SubChunk > 0) && &SubChunkHasNonBlankDelta(1, @SubChunk)) {
     push @DstChunk, @SubChunk;
   }
-  print $FH @DstChunk if ($#DstChunk > 2);
+  if ($FH ne '') {
+    print $FH @DstChunk if ($#DstChunk > 2);
+  }
+  return @DstChunk;
 }
 
 sub VerifyDiffIsWhite() {
@@ -436,7 +440,7 @@ sub VerifyDiffIsWhite() {
   push @DstChunk, shift @Chunk;
   push @DstChunk, shift @Chunk;
   push @DstChunk, shift @Chunk;
-  
+
   foreach $Line (@Chunk) {
     if ($Line =~ /^@@ /) {
       if (($#SubChunk > 0) && &SubChunkHasNonBlankDelta($DiffLevel, @SubChunk)) {
@@ -484,19 +488,20 @@ sub StripAllWhiteSpace() {
   
   foreach $Line (@Chunk) {
     if ($Line =~ /^@@ /) {
-      if ($#SubChunk > 0)  {
+      if ($#SubChunk > 2)  {
         push @DstChunk, &StripWhiteSpaceChangesInSubChunk($DiffLevel, @SubChunk);
       }
       @SubChunk = ();
     }
     push @SubChunk, $Line;
   }
-  if ($#SubChunk > 0)  {
+  if ($#SubChunk > 2)  {
     push @DstChunk,  &StripWhiteSpaceChangesInSubChunk($DiffLevel, @SubChunk);
   }
   
-  open(my $Dst, "> $File") || 
-    die "Unable to create '$File'\n";
+  if ($File ne '') {
+    print $File @DstChunk;
+  }
   return @DstChunk;
 };
 
@@ -507,7 +512,8 @@ sub StripWhiteSpaceChangesInSubChunk() {
   # followed by context lines
   my ($DiffLevel, @SubChunk) = (@_);
   my (@Types) = map { '0' } @SubChunk;
-  
+  $Types[0] = 'c';
+
   for (my $i = 1;
        $i <= $#SubChunk;
        ++$i) {
@@ -522,14 +528,19 @@ sub StripWhiteSpaceChangesInSubChunk() {
       $Types[$i] = 'x';
     }
   }
-  push @Types, 'c';
-
+  
+  if (0) {
+    foreach (0 .. $#SubChunk) {
+      print "$Types[$_]: ", $SubChunk[$_];
+    }
+    print "\n\n\nNow trying to reset all isolated whitespace changes\n";
+  }
   my $i = 1;
   while ($i <= $#SubChunk) {
     my ($Line) = $SubChunk[$i];
     if (($Types[$i] eq 'w') && 
         (($Types[$i-1] eq 'c') || ($Types[$i-1] eq 'w')) &&
-        (($Types[$i+1] eq 'c') || ($Types[$i+1] eq 'w'))) {
+        (($i == $#SubChunk) || (($Types[$i+1] eq 'c') || ($Types[$i+1] eq 'w')))) {
       if (substr($Line,0,1) eq '-') {
         $Types[$i] = 'c';
         # only thing that needs to happen is to get rid of the '-' and turn it
@@ -537,11 +548,18 @@ sub StripWhiteSpaceChangesInSubChunk() {
         $SubChunk[$i] = " " . substr($Line,1);
         $i++;
       } elsif (substr($Line,0,1) eq '+') {
-        $Types[$i] = $Types[$i+1];
+        splice(@Types, $i, 1);
         splice(@SubChunk, $i, 1);
       }
     } else {
       $i++;
+    }
+
+    if (0) {
+      foreach (0 .. $#SubChunk) {
+        print "$Types[$_]: ", $SubChunk[$_];
+      }
+      print "\n";
     }
   }
   return @SubChunk;
@@ -645,8 +663,8 @@ chomp($_ = `pwd`);
     }
   } elsif (grep { /^-VerifyDiffIsWhite$/ } @ARGV) {
     my($DiffLevel) = 1;
-    &ArgvHasUniqueOpt('-d', \$DiffLevel);
-    my (@Patches) = grep { !/^-\w*$/ } @ARGV;
+    &ArgvHasUniqueOpt('-DiffLevel', \$DiffLevel);
+    my (@Patches) = grep { !/^-\w+/ } @ARGV;
     my ($Rtn) = 1;
     print "In ", `pwd`;
 
@@ -665,7 +683,23 @@ chomp($_ = `pwd`);
       $Rtn || die "Non-whitespace change in '$FileOrCmd'\n";
     }
   } elsif (grep { /^-StripAllWhiteSpace$/ } @ARGV) {
-    die "ACk!\n"; 
+    my (@Patches) = grep { !/^-\w+/ } @ARGV;
+    my($DiffLevel) = 1; my ($File);
+    &ArgvHasUniqueOpt('-DiffLevel', \$DiffLevel);
+
+    print "Processing:\n\t", join("\n\t",@Patches), "\n" if ($#Patches >= 0);
+    for $File (@Patches) {
+      open (my $Fh, "$File") || die "Unable to open patch '$File' for reading\n";
+      my (@Lines) = <$Fh>;
+      close $Fh;
+      my %Assoc;
+      $Assoc{"DiffLevel"}=$DiffLevel;
+      open ($Fh, ">${File}.stripped") || die "Unable to create '${File}.stripped'\n";
+      $Assoc{"File"}=$Fh;
+      &ProcessPatch(\&StripAllWhiteSpace, \%Assoc, 
+                    &ProcessPatch(\&StripWhiteSpace, '', @Lines));
+      close($Fh);
+    }
   } elsif (grep { /^-Log$/ } @ARGV) {
     my (@Revs) = &ArgvHasOpt('-r');
     my (%Rtn);
@@ -707,17 +741,17 @@ chomp($_ = `pwd`);
     print "-Log (-rREV)\n";
     print "-Clean -- be careful of files hidden from view via .hgignore\n";
     print "-DelWhiteSpace PatchFiles... safely removes all diff subchunks with only whitespace changes\n";
-    print "-VerifyDiffIsWhite {DiffLevel} PatchesOrCommands)... \n" .
+    print "-VerifyDiffIsWhite -DiffLevel=NUM PatchesOrCommands)... \n" .
      "  Optional DiffLevel argument:\n" . 
-     "  DiffLevel is -d1 (default), -d2, -d3 ... \n" .
+     "  -DiffLevel must be a positive integer (1 for main diff, 2 for diff of a diff ...) \n" .
      "  where 1 is a single diff, 2 is a diff of a diff, 3 is a diff or a diff of a diff..\n" .
-     "  DiffLevel > 1 is necessary to discern what happens if your change is to a patch file." .
+     "  -DiffLevel > 1 is necessary to discern what happens if your change is to a patch file." .
      "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n" .
-     "  For example: -VerifyDiffIsWhite -d2 'diff -u A.patch B.patch'" .
+     "  For example: -VerifyDiffIsWhite -DiffLevel=2 'diff -u A.patch B.patch'" .
      "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
-    print "-StripAllWhiteSpace\n" .
-     "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
-     "  with real diffs. Uses the DiffLevel argument\n";
+    #print "-StripAllWhiteSpace\n" .
+    # "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
+    # "  with real diffs. Uses the DiffLevel argument\n";
   }
 
 ## first bad revision 23197
