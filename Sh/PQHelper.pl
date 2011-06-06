@@ -310,20 +310,6 @@ sub HgRefreshLoop() {
   print "Refresh Successful\n";
 }
 
-sub TagRepo {
-  my ($RepoRoot, $BaseRev, $Tag) = @_;
-  chomp($RepoRoot = `pwd`) if ($RepoRoot eq '');
-  chdir $RepoRoot;
-  print "Tag the repo with $Tag ? ";
-  my $ans = <STDIN>;
-  if ($ans =~ /y(e(s)?)?/i) {
-    Shell("hg qpop -a");
-    my (%Log) = &GetHgLog($BasRev);
-    my ($RevName) = &GetRevName(%Log);
-    Shell("hg tag -l -r $Log{rev} ${RevName}${Tag}");
-  }
-}
-
 sub HgPushLoop() {
   my (@PatchList) = @_;
   my ($MqPatch);
@@ -614,7 +600,7 @@ chomp($_ = `pwd`);
     
 
     &ArgvHasUniqueOpt('-PatchDir', \$PatchDir) ||
-      die "Requires $PatchDir\n";
+      die "Requires -PatchDir=DIR\n";
 
     opendir(my $dh, $PatchDir) || die "can't opendir the patch directory $PatchDir: (use -PatchDir DIR) $!";
     @PatchList = sort map { $_ = "${PatchDir}/$_" }
@@ -647,7 +633,7 @@ chomp($_ = `pwd`);
     $Where = '-FromNow';
     $FirstParent = '';
     
-    &ArgvHasUniqueOpt('-SrcRepo', \$SrcRepo);
+    &ArgvHasUniqueOpt('-SrcRepo', \$SrcRepo) || die "Need SrcRepo -SrcRepo=DIR\n";
     &ArgvHasUniqueOpt('-PatchOptions', \$PatchOptions);
 
     &ArgvHasUniqueOpt('-DstRepo', \$DstRepo) ||
@@ -671,6 +657,14 @@ chomp($_ = `pwd`);
     &HgRefreshAll($_, );
   } elsif (grep { /^-ContinueRefresh$/ } @ARGV) {
     &HgContinueRefresh($_);
+  } elsif (grep { /^-Merge3$/ } @ARGV) {
+    my (@Rejected) = grep { chomp } Piped("hg stat -un", "Get list of rejected chunks");
+    my ($BaseRev, $CurrRev);
+    my ($RepoDir) = '';
+    &ArgvHasUniqueOpt('-BaseRev', \$BaseRev) || die "requries -BaseRev=REV\n";
+    &ArgvHasUniqueOpt('-CurrRev', \$CurrRev) || die "requries -CurrRev=REV\n";
+    &Merge3($RepoDir, $BaseRev, $CurrRev, @Rejected);
+
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
     my ($Rev);
     &ArgvHasUniqueOpt('-BaseRev', \$Rev) || die "requries -BaseRev REV\n";
@@ -701,7 +695,6 @@ chomp($_ = `pwd`);
                     &ProcessPatch(\&StripAllWhiteSpace, '', @Lines));
       close($Fh);
       &MergePatchHeader($File, "${File}.stripped", "${File}.stripped");
-      
     }
   } elsif (grep { /^-VerifyDiffIsWhite$/ } @ARGV) {
     my($DiffLevel) = 1;
@@ -753,10 +746,16 @@ chomp($_ = `pwd`);
       "   -FirstParent=REV - in case the first rev has 2 parents, use this to generate the hg export.\n" .
       "   \n";
     print "-Track\n";
+
+    print "-Refresh/-Rebase\n" .
+      "  attempts to start a new rebase operation on the current revision\n\n" .
+        "  If the automated rebase fails, run the following\n";
     
-    print "-Refresh\n" .
-      "  attempts to start a new rebase operation on the current revision\n" .
-        " \n";
+    print "-Merge3\n" .
+      "  -RepoDir=DIR\n" .
+      "  -OrigRev=REV\n" .
+      "  -CurrRev=REV\n" .
+      " \n";
     print "-ContinueRefresh\n" .
       " Attempts to continue the refresh operation\n";
     print "-CommitRefresh\n" .
@@ -764,7 +763,11 @@ chomp($_ = `pwd`);
 
     print "-Log (-rREV)\n";
     print "-Clean -- be careful of files hidden from view via .hgignore\n";
-    print "-DelWhiteSpace PatchFiles... safely removes all diff subchunks with only whitespace changes\n";
+    print "\n";
+    print "-StripAllWhiteSpace FILES...\n" .
+     "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
+     "  with real diffs. Uses the DiffLevel argument\n";
+
     print "-VerifyDiffIsWhite -DiffLevel=NUM PatchesOrCommands)... \n" .
      "  Optional DiffLevel argument:\n" . 
      "  -DiffLevel must be a positive integer (1 for main diff, 2 for diff of a diff ...) \n" .
@@ -773,9 +776,6 @@ chomp($_ = `pwd`);
      "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n" .
      "  For example: -VerifyDiffIsWhite -DiffLevel=2 'diff -u A.patch B.patch'" .
      "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
-    print "-StripAllWhiteSpace\n" .
-     "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
-     "  with real diffs. Uses the DiffLevel argument\n";
   }
 
 ## first bad revision 23197

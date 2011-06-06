@@ -28,15 +28,19 @@ my (%Log) = &GetHgLog('');
 Shell("hg qpush -a", "Push current set og patchs");
 chdir $NaCl;
 
-$Rev = "svn${Log{svn}}";
+$Rev = &GetRevName(%Log);
+
 print "*********************************\n";
 print "This test is for $Rev\n";
-Shell("./tools/llvm/utman.sh llvm-clean", "LLVM clean");
-Shell("./tools/llvm/utman.sh llvm", "LLVM");
-Shell("./tools/llvm/utman.sh driver", "");
-Shell("./tools/llvm/utman-test.sh test-all", "");
+&Shell("./tools/llvm/utman.sh llvm-clean", "LLVM clean");
+&Shell("./tools/llvm/utman.sh llvm", "LLVM");
+&Shell("./tools/llvm/utman.sh driver", "");
+&Shell("./tools/llvm/utman-test.sh test-all", "");
 
 print "SUCCESS WITH REV $Rev\n";
 print "Now saving the artifacts\n";
-Shell("./save-test-artifacts.pl $Rev");
+&Shell("./save-test-artifacts.pl ${Rev}");
+
+&TagRepo($_, $Log{rev}, "TestsPassed");
+
 exit(0);

@@ -7,6 +7,7 @@ package RepoHelper;
 use strict;
 use warnings;
 use File::Basename;
+use File::Temp qw/ tempfile tempdir /; ;
 #use IPC::System::Simple;
 #use autodie qw(:all);
 
@@ -23,6 +24,7 @@ BEGIN {
   @EXPORT      = qw(&GetRepoRoot &QuoteIt &Shell &Piped &GetHgLog 
                     &SaveTestArtifacts &WriteLog 
                     &MergePatchHeader &GetRevName
+                    &TagRepo &Merge3
                     &ArgvHasFlag &ArgvHasOpt &ArgvHasUniqueOpt);
   %EXPORT_TAGS = ( );           # eg: TAG => [ qw!name1 name2! ],
 
@@ -32,6 +34,64 @@ BEGIN {
 }
 our @EXPORT_OK;
 END { }       # module clean-up code here (global destructor)
+
+sub TagRepo {
+  my ($RepoRoot, $BaseRev, $Tag) = @_;
+  chomp($RepoRoot = `pwd`) if ($RepoRoot eq '');
+  chdir $RepoRoot;
+  print "Tag the repo with $Tag ? ";
+  my $ans = <STDIN>;
+  if ($ans =~ /y(e(s)?)?/i) {
+    Shell("hg qpop -a");
+    my (%Log) = &GetHgLog($BaseRev);
+    my ($RevName) = &GetRevName(%Log);
+    Shell("hg tag -l -r $Log{rev} ${RevName}${Tag}");
+  }
+}
+
+sub Merge3 {
+  my ($RepoDir, $BaseRev, $CurrRev, @Rejected) = @_;
+  chomp($RepoDir=`pwd`) if ($RepoDir eq '');
+  chdir $RepoDir;
+
+  my (%BaseRevLog) = &GetHgLog($BaseRev);
+  my (%CurrRevLog) = &GetHgLog($CurrRev);
+  my ($BaseRevName) = &GetRevName(%BaseRevLog);
+  my ($CurrRevName) = &GetRevName(%CurrRevLog);
+
+  my (@suffixes) = (qw(.rej -rej .orig -orig));
+
+  my ($TmpDir); chomp ($TmpDir = &tempdir(CLEANUP => 0));
+  &WriteLog(\ %BaseRevLog);
+  &WriteLog(\ %CurrRevLog);
+
+  my ($Rej);
+  foreach $Rej (@Rejected) {
+    my ($File, $Dir, $Suffix) = &fileparse($Rej, @suffixes);
+    # A: The $File @ $OrigRev
+    # B: apply the .rej  to it 
+    # C: The current file (which should be at revision $CurrRev)
+    Shell("mv $Rej ${TmpDir}", "Copy reject hunk to Output directory");
+
+    if (! -e "${RepoDir}/${Dir}/$File") {
+      print "File $Rej does not correspond to an existing file in the repo\n";
+    } else {
+      Shell("hg cat -r $BaseRevLog{rev} ${Dir}/$File -o ${TmpDir}/${File}.$BaseRevName", 
+            "Get version $BaseRevName of  ${Dir}/$File");
+      Shell("cp ${TmpDir}/${File}.$BaseRevName ${TmpDir}/${File}",
+            "Copy before patching");
+      Shell("(cd $TmpDir; patch <${File}${Suffix})", "patch file");
+      Shell("kdiff3 ${TmpDir}/${File}.$BaseRevName ${TmpDir}/${File} ${Dir}/${File}");
+    }
+  }
+}
+
+# sub Merge3Loop {
+#   my ($RepoDir, 
+#       $BaseRevName, $BaseRevLog, 
+#       $CurrRev, $CurrRevLog,
+# }
+
 
 sub ArgvHasFlag {
   # returns the list of matching options
@@ -173,7 +233,6 @@ sub MergePatchHeader {
     last if ($Dst[0] =~ /^diff /);
     shift (@Dst)
   }
-  
 
   push @Header, " From $PatchName\n";
   open ($DstFh, ">$Dst")
