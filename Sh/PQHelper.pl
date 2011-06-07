@@ -63,9 +63,37 @@ sub InitPatchQueue() {
     "Examine the state of the repo and -CommitRefresh\n";
 }
 
+sub Foo {
+  my ($SrcRepoDir, my $DstRepoDir) = @_;
+  my ($Cmd1, $SrcRepo) = &GetRepoRoot($SrcRepoDir);
+  my ($Cmd2, $DstRepo) = &GetRepoRoot($DstRepoDir);
+  my (%L1);
+  my (%L2);  
+
+  print "SRC=$SrcRepo\n";
+  print "DST=$DstRepo\n";
+
+  chdir $SrcRepo;
+  print "In ", `pwd`;
+  %L1 = &GetHgLog('');
+  &WriteLog(\%L1);
+
+  chdir $DstRepo;
+  print "In ", `pwd`;  
+  %L2 = &GetHgLog('');
+  &WriteLog(\%L2 );
+
+  chdir $SrcRepo;
+  print "In ", `pwd`;  
+  %L1 = &GetHgLog('');
+  &WriteLog(\ %L1 );
+
+}
+
+
 sub InitPatchQueueFromHgExport {
 
-  my ($SrcRepo, $PatchOptions, $BaseRev, $EndRev, $DstRepo, 
+  my ($SrcRepoDir, $PatchOptions, $BaseRev, $EndRev, $DstRepoDir, 
       $DstBaseRev, $Where, $FirstParent) = @_;
   # Generates a set of patches from the source repository
   # and lands them as MQ patches in the destination repository.
@@ -80,24 +108,29 @@ sub InitPatchQueueFromHgExport {
   # entire alternate branch was applied as a single rev.
 
   my ($UseTraditional) = 1;
-
+  my ($SrcRepo, $DstRepo);
   my ($OrigDir); chomp ($OrigDir= `pwd`);
+  my ($Cmd);
 
-  $SrcRepo = &GetRepoRoot($SrcRepo);
-  $DstRepo = &GetRepoRoot($DstRepo);
+  ($Cmd, $SrcRepo) = &GetRepoRoot($SrcRepoDir);
+  ($Cmd, $DstRepo) = &GetRepoRoot($DstRepoDir);
 
-  chdir $DstRepo;
+  chdir $DstRepo || die "YUK!";
   if ($DstBaseRev ne '') {
     Shell("hg up -r '$DstBaseRev'");
-    Shell("hg qinit -c", "") if (! -d ".hg/patches/.hg");
   }
+  Shell("hg qinit -c", "") if (! -d ".hg/patches/.hg");
+
   my (@PatchSeq) = &Piped("hg qseries", "Get the existing patch series");
   my (@Applied) =  &Piped("hg qapplied", "How many patches are applied?");
 
   &HgRevertClean($DstRepo);
+  print "SrcRepo $SrcRepo $SrcRepoDir DstRepo $DstRepo $DstRepoDir ", `pwd`;
+  chdir $SrcRepo;
+  print "SrcRepo $SrcRepo DstRepo $DstRepo ", `pwd`;
   my (@Path) = &FindEditPath($SrcRepo, $BaseRev, $EndRev);
   my ($LastRev, $Rev) = '';
-
+  print "INININ ", `pwd`;
   # first, get the base revision - if it has two parents, abort!
   my ($FirstRev) = $Path[0];
   my ($Parents) = &GetEdges($FirstRev, "parents");
@@ -594,10 +627,19 @@ chomp($_ = `pwd`);
   if (grep { /^-Clean$/ } @ARGV) {
     &HgRevertClean($_);
     &HgRevertClean("$_/.hg/patches");
+
+  } elsif (grep { /^-Foo$/ } @ARGV) {
+    my ($SrcDir, $DstDir);
+    &ArgvHasUniqueOpt('-SrcDir', \$SrcDir) ||
+      die "Requires -SrcDir=DIR\n";
+    &ArgvHasUniqueOpt('-DstDir', \$DstDir) ||
+      die "Requires -DstDir=DIR\n";
+    &Foo($SrcDir, $DstDir);
+    
   } elsif (grep { /^-Init$/ } @ARGV) {
     
     my ($PatchOptions, $PatchDir, $RepoDir, $BaseRev, $Where);
-    
+    my ($Cmd,$R1);
 
     &ArgvHasUniqueOpt('-PatchDir', \$PatchDir) ||
       die "Requires -PatchDir=DIR\n";
@@ -614,8 +656,15 @@ chomp($_ = `pwd`);
     &ArgvHasUniqueOpt('-PatchOptions', \$PatchOptions);
     
     chomp($RepoDir = `pwd`);
-    &ArgvHasUniqueOpt('-RepoDir', \$RepoDir);
+    ($Cmd, $RepoDir) = &GetRepoRoot($RepoDir);
+    if (! &ArgvHasUniqueOpt('-RepoDir', \$RepoDir)) {
+      die "$RepoDir is not a valid Hg Repo directory. Use -RepoDir=DIR)\n" 
+        if ($Cmd ne 'hg');
+    }
     
+    ($Cmd, $RepoDir) = &GetRepoRoot($RepoDir);
+    die "-RepoDir='$RepoDir' is not a valid Hg Repo directory.\n" 
+      if ($Cmd ne 'hg');
 
     ## &InitPatchQueue("-p2 -s", \@PatchList,  $_, "svnrev(124151)",);
     &InitPatchQueue($PatchOptions, \@PatchList, $RepoDir, $BaseRev);
@@ -667,8 +716,13 @@ chomp($_ = `pwd`);
 
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
     my ($Rev);
-    &ArgvHasUniqueOpt('-BaseRev', \$Rev) || die "requries -BaseRev REV\n";
-    &HgCommitMqRefresh($_, $Rev);
+    my ($RepoRoot) = $_;
+    if (! &ArgvHasUniqueOpt('-BaseRev', \$Rev)) {
+      print "No -BaseRev specified. Seeing if rev qparent exists..\n";
+      my %Log = &GetHgLog('qparent');
+      $Rev = $Log{rev};
+    }
+    &HgCommitMqRefresh($RepoRoot, $Rev);
   } elsif (grep { /^-DelWhiteSpace$/ } @ARGV) {
     my (@Patches) = grep { !/^-\w*$/ } @ARGV;
     print "Processing:\n\t", join("\n\t",@Patches), "\n" if ($#Patches >= 0);

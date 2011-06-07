@@ -69,7 +69,7 @@ sub Merge3 {
   foreach $Rej (@Rejected) {
     my ($File, $Dir, $Suffix) = &fileparse($Rej, @suffixes);
     # A: The $File @ $OrigRev
-    # B: apply the .rej  to it 
+    # B: apply the .rej  to it
     # C: The current file (which should be at revision $CurrRev)
     Shell("mv $Rej ${TmpDir}", "Copy reject hunk to Output directory");
 
@@ -137,9 +137,10 @@ sub ArgvHasUniqueOpt {
 sub GetRepoRoot {
   my ($CMD) = "";
   my ($Dir) = (@_);
-  my ($Orig) = $Dir;
+  my ($Orig); chomp($Orig =`pwd`);
 
-  chdir $Dir;
+  chdir $Dir || die "Unable to chdir to $Dir from ", `pwd`;
+  chomp($Dir=`pwd`);  
   while ($Dir ne "/") {
     if (-d ".svn") {
       $CMD = "svn"; last;
@@ -148,9 +149,9 @@ sub GetRepoRoot {
     }
     chdir ("..");
     chomp($Dir = `pwd`);
-    # print "Now In $Dir $CMD\n"
-  }
 
+  }
+  print "Now In $Dir $CMD\n";
   chdir $Orig;
   die "Unable to determine Repo type for '$Orig'\n" if ($CMD eq "");
   return ($CMD, $Dir);
@@ -246,7 +247,7 @@ sub GetHgLog {
   # get important info about the current rev
   my ($CurrHgRev) = @_;
   if ($CurrHgRev eq '') {
-    my (@Rev) = grep { chomp; } Piped("hg id -i");
+    my (@Rev) = grep { chomp; } Piped("hg id -i", "Getting current rev");
     $CurrHgRev =  shift @Rev;
     $CurrHgRev =~ s/\+$//g; ## kill any trailing '+'
   }
