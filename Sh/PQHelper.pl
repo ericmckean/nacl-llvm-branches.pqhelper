@@ -110,7 +110,7 @@ sub InitPatchQueueFromHgExport {
   my ($UseTraditional) = 1;
   my ($SrcRepo, $DstRepo);
   my ($OrigDir); chomp ($OrigDir= `pwd`);
-  my ($Cmd);
+  my ($Cmd, $Base);
 
   ($Cmd, $SrcRepo) = &GetRepoRoot($SrcRepoDir);
   ($Cmd, $DstRepo) = &GetRepoRoot($DstRepoDir);
@@ -151,10 +151,12 @@ sub InitPatchQueueFromHgExport {
     my %ParentRev = &GetHgLog($FirstParent);
     $FirstParent = $ParentRev{'rev'} # get the canonical rev for the Parent
   }
+  chdir ($DstRepo);
+  my (@CurrSeries) = grep { chomp } Piped("hg qseries", "get existing qseries");
   
   chdir $SrcRepo;
-  my ($TmpDir); chomp ($TmpDir = &tempdir(CLEANUP => 0));
-  my ($i, $idx) = (0, "0000");
+  my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgexport.XXXXX", CLEANUP => 0));
+  my ($i, $idx) = ($#CurrSeries+1, sprintf("%04d", $#CurrSeries+1));
   my ($RevLog) = $Path[0];
   my ($tweak) = '';
 
@@ -174,7 +176,7 @@ sub InitPatchQueueFromHgExport {
 
   foreach $i (1 .. $#Path) {
     $RevLog = $Path[$i];
-    $idx = sprintf "%04d",$i;
+    $idx = sprintf "%04d",$i + $Base;
     print "REVISION: ${$RevLog}{rev} ";
     my($Parents) = &GetEdges($RevLog, "parents");
     if ($#$Parents == 0) {
@@ -689,8 +691,9 @@ chomp($_ = `pwd`);
       die   "Need a destination repo dir (use -DstRepo DIR)\n";
     &ArgvHasUniqueOpt('-BaseRev', \$BaseRev) ||
       die "Need a Base Revision (-BaseRev=REV)\n";
+    $EndRev = $BaseRev;    
     &ArgvHasUniqueOpt('-EndRev', \$EndRev) ||
-      die "Need a End Revision (-EndRev=REV)\n";
+      print "Need a End Revision (Using -EndRev=$BaseRev)\n";
     &ArgvHasUniqueOpt('-DstBaseRev', \$DstBaseRev);
 
     $Where = '-FromStart' if (&ArgvHasFlag('-FromStart'));

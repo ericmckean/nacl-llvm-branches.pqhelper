@@ -61,7 +61,7 @@ sub Merge3 {
 
   my (@suffixes) = (qw(.rej -rej .orig -orig));
 
-  my ($TmpDir); chomp ($TmpDir = &tempdir(CLEANUP => 0));
+  my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgmerge.$BaseRevName.$CurrRevName.XXXXXX", CLEANUP => 0));
   &WriteLog(\ %BaseRevLog);
   &WriteLog(\ %CurrRevLog);
 
