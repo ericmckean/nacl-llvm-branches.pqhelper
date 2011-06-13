@@ -28,8 +28,8 @@ sub InitPatchQueue() {
   Shell("hg up -r '$BaseRev'", "") if ($BaseRev ne '');
   Shell("hg qinit -c", "") if (! -d ".hg/patches/.hg");
 
-  my(@MqSeries) = Piped("hg qseries");
-  my (@MqApplied) = Piped("hg qapplied");
+  my(@MqSeries) = Piped("hg qseries", "get patch sequence");
+  my (@MqApplied) = Piped("hg qapplied", "get applied sequence");
 
   Shell("hg qpop -a", "");
   
@@ -170,7 +170,6 @@ sub InitPatchQueueFromHgExport {
     }
   }
   
-  
   Shell("hg export -r ${$RevLog}{rev} ${tweak} -o \"${TmpDir}/%b-${idx}-%r-%H.patch\"", 
         "export initial version");
 
@@ -197,7 +196,7 @@ sub InitPatchQueueFromHgExport {
     }
   }
   
-  @NewPatches = &Piped("ls -1 ${TmpDir}/*.patch", "Get List Of New Patches");
+  @NewPatches = grep { chomp } &Piped("ls -1 ${TmpDir}/*.patch", "Get List Of New Patches");
   if ($UseTraditional) {
     print "************************************************************************\n";
     print "About to apply the patches in ${TmpDir}\n",
@@ -286,13 +285,6 @@ sub FindEditPath {
 
 
 
-sub HgGetUnknownFiles() {
-  my (@Files) = map { chomp; $_ = substr($_,2) } 
-    grep { /^?/ } 
-      Piped("hg stat -u", "Getting unknown files..");
-  return @Files;
-}
-
 sub HgRevertClean() {
   my ($RepoDir) = @_;
   my ($CMD, $RepoRoot) =  &GetRepoRoot($RepoDir);
@@ -345,25 +337,6 @@ sub HgRefreshLoop() {
   print "Refresh Successful\n";
 }
 
-sub HgPushLoop() {
-  my (@PatchList) = @_;
-  my ($MqPatch);
-  my (@Files) = &HgGetUnknownFiles();
-  if ($#Files >= 0) {
-    print  "\t" . join("\t\n", @Files) .
-      "\n*WARNING! he above untracked files are in the repo.\n" .
-        "Please either PQHelper.pl -Clean or merge them somehow\n";
-  }
-
-  foreach $MqPatch (@PatchList) {
-    last if ($MqPatch eq "STOP");
-    chomp $MqPatch;
-    print "Processing $MqPatch\n";
-    Shell("hg qpush $MqPatch", "", "");
-  }
-  Shell("hg -R .hg/patches stat", "");
-}
-
 sub HgContinueRefresh {
   ## called when a HgRefreshAll has failed and a manual intervention was required
   ## the repo must be clean, esp without any .orig or -rej files
@@ -375,93 +348,7 @@ sub HgContinueRefresh {
   &HgRefreshLoop(@MqSeries);
 }
 
-sub HgCommitMqRefresh {
-  # To be run after a successful refresh step.
-  # Pre: all patches are already pushed and refreshed
 
-  my ($RepoDir, $BaseRev) = (@_);
-  my ($CMD, $RepoRoot) =  &GetRepoRoot($RepoDir);
-  print "Attemting to commit the following changes";
-  Shell("hg stat", "Main Repo Status");
-  Shell("hg -R .hg/patches stat", "Patch Repo Status");
-  my (%RevLog) = &GetHgLog($BaseRev);
-  print "Commiting Rebase to the following version\n";
-  &WriteLog(\ %RevLog);
-  print "Are you sure you are merging for '$BaseRev'? :";
-  $_ = <STDIN>;
-  die "Ok, aborting\n" if (! /y(e(s)?)?/i );
-  print "Double checking to make sure you aren't mistaken\n";
-  my (@MqSeries) = grep { chomp } Shell("hg qapplied");
-  Shell("hg qpop -a", "Double check");
-  my (%ActualRevB4Patch) = &GetHgLog('');
-  die "You LIE! Revs don't match -- its actually ${ActualRevB4Patch}{rev}\n"
-    if ($ActualRevB4Patch{"rev"} ne $RevLog{"rev"});
-  &HgPushLoop(@MqSeries);
-  my ($RevName) = &GetRevName(%RevLog);
-  my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a");
-  if (grep { /^${RevName}\s/x } @AllBranches) {
-    print "Branch $RevName already exists\n";
-  } else {
-    print "Creating new branch $RevName\n";
-    Shell("hg -R .hg/patches branch $RevName", "");
-  }
-  Shell("hg commit -R .hg/patches", "COMMIT THE BRANCH");
-};
-
-
-sub ProcessPatch () {
-  # @Chunk (for --unified diffs) has:
-  # comments
-  # diff ...
-  # --- ...
-  # +++ ...
-  # followed by one or more SubChunk
-  # @@ ...
-
-  my ($Func, $Arg, @Lines) = (@_);
-  my $Line;
-  my $DiffStart = '';
-  my @Chunk;
-  my (@Rtn);
-
-  foreach $Line (@Lines) {
-    if ($Line =~ /^diff /) {
-      $DiffStart = $Line;
-      push @Rtn, &$Func($Arg, @Chunk) if ($#Chunk > 0);
-      # clear Chunk out for next bit
-      @Chunk = ();
-    }
-    push @Chunk, $Line;
-  }
-  push @Rtn, &$Func($Arg, @Chunk)  if ($#Chunk >= 2);
-  return @Rtn;
-}
-
-
-sub StripWhiteSpace {
-  my ($FH, @Chunk) = (@_);
-  my (@SubChunk);
-  my (@DstChunk);
-  ($#Chunk >= 2) || die "@Chunk is incomplete";
-  push @DstChunk, shift @Chunk;
-  push @DstChunk, shift @Chunk;
-  push @DstChunk, shift @Chunk;
-
-  foreach $Line (@Chunk) {
-    if ($Line =~ /^@@ /) {
-      if (($#SubChunk > 0) && &SubChunkHasNonBlankDelta(1, @SubChunk)) {
-        push @DstChunk, @SubChunk;
-      }
-      @SubChunk = ();
-    }
-    push @SubChunk, $Line;
-  }
-  if ( ($#SubChunk > 0) && &SubChunkHasNonBlankDelta(1, @SubChunk)) {
-    push @DstChunk, @SubChunk;
-  }
-  print $FH @DstChunk if ($#DstChunk > 2 && $FH ne '');
-  return @DstChunk;
-}
 
 sub VerifyDiffIsWhite() {
   my ($DiffLevel, @Chunk) = (@_);
@@ -506,110 +393,6 @@ sub SubChunkHasNonBlankDelta() {
   return 0;
 }
 
-sub StripAllWhiteSpace() {
-  my ($File, @Chunk) = (@_);
-  my (@SubChunk);
-  my (@DstChunk);
-  my ($DiffLevel) = $$Assoc{"DiffLevel"};
-
-  ($#Chunk >= 2) || die "@Chunk is incomplete";
-  push @DstChunk, shift @Chunk;
-  push @DstChunk, shift @Chunk;
-  push @DstChunk, shift @Chunk;
-  
-  foreach $Line (@Chunk) {
-    if ($Line =~ /^@@ /) {
-      if ($#SubChunk > 2)  {
-        push @DstChunk, &StripWhiteSpaceChangesInSubChunk($DiffLevel, @SubChunk);
-      }
-      @SubChunk = ();
-    }
-    push @SubChunk, $Line;
-  }
-  if ($#SubChunk > 2)  {
-    push @DstChunk,  &StripWhiteSpaceChangesInSubChunk($DiffLevel, @SubChunk);
-  }
-
-  print $File @DstChunk if ($#DstChunk > 2 && $File ne '') ;
-
-  return @DstChunk;
-};
-
-sub StripWhiteSpaceChangesInSubChunk() {
-  # strips all isolated whitespace changes
-  # isolated whitespace are context lines followed by
-  # only whitespace substracts or deletes
-  # followed by context lines
-  my ($DiffLevel, @SubChunk) = (@_);
-  my (@Types) = map { '0' } @SubChunk;
-  $Types[0] = 'c';
-
-  for (my $i = 1;
-       $i <= $#SubChunk;
-       ++$i) {
-    my ($Line) = $SubChunk[$i];
-    # Skip diffs to context lines
-    next if ($Line =~ /^[+-]{$DiffLevel} (\+\+|--)\s/x);
-    if ($Line =~ /^ /) {
-      $Types[$i] = 'c';
-    } elsif ($Line =~ /^[+-]{$DiffLevel}\s*$/x) {
-      $Types[$i] = 'w';
-    } else {
-      $Types[$i] = 'x';
-    }
-  }
-  
-  if (0) {
-    foreach (0 .. $#SubChunk) {
-      print "$Types[$_]: ", $SubChunk[$_];
-    }
-    print "\n\n\nNow trying to reset all isolated whitespace changes\n";
-  }
-  my ($i,$safe,$j) = (1,0,0);
-  my @safelines;
-  while ($i <= $#SubChunk) {
-    if ($Types[$i] eq 'c') {
-      $safe = 1; next;
-    } elsif ($Types[$i] eq 'x') {
-      $safe = 0; next;
-    }
-    if (($Types[$i] eq 'w') && $safe) {
-      # scan forward and see if the whitespace run remains safe.
-      $j = $i+1 if ($j < $#SubChunk);
-      while ($safe && ($j <= $#SubChunk)) {
-        last if ($Types[$j] eq 'c');
-        if ($Types[$j] eq 'w') {
-          next;
-        }
-        $safe = 0;
-        $i = $j+1;
-      } continue {  $j++;  }
-
-      if ($safe) {
-        while ($i <= $j) {
-          my ($Line) = $SubChunk[$i];
-          if (substr($Line,0,1) eq '-') {
-            $Types[$i] = 'c';
-            # only thing that needs to happen is to get rid of the '-' and turn it
-            # into a context line
-            $SubChunk[$i] = " " . substr($Line,1);
-          } elsif (substr($Line,0,1) eq '+') {
-            splice(@Types, $i, 1);
-            splice(@SubChunk, $i, 1);
-            $j--; $i--;
-          }
-        } continue { $i++; }
-      }
-    }
-  } continue { $i++; }
-  if (0) {
-    foreach (0 .. $#SubChunk) {
-      print "$Types[$_]: ", $SubChunk[$_];
-    }
-    print "\n";
-  }
-  return @SubChunk;
-}
 
 sub HgTrackPatch {
   my ($RepoDir) = @_;
@@ -624,6 +407,17 @@ sub HgTrackPatch {
   Shell("hg delete ${\(join(' ', @ToBeDeleted))}", "FORGET THESE OLD FILES") if ($#ToBeDeleted >= 0);
 }
 
+sub GetPatchedFiles {
+  my ($RepoDir) = @_;
+  $RepoDir = &GetRepoRoot($RepoDir);
+  my (@Patches) = grep { chomp } Piped("hg qseries");
+  chdir $RepoDir;
+  chdir ".hg/patches";
+  my (@Files) = Piped("egrep -h '^diff ' " . join(" ", @Patches));
+  print @Files;
+}
+
+
 chomp($_ = `pwd`);
 
   if (grep { /^-Clean$/ } @ARGV) {
@@ -632,11 +426,13 @@ chomp($_ = `pwd`);
 
   } elsif (grep { /^-Foo$/ } @ARGV) {
     my ($SrcDir, $DstDir);
-    &ArgvHasUniqueOpt('-SrcDir', \$SrcDir) ||
-      die "Requires -SrcDir=DIR\n";
-    &ArgvHasUniqueOpt('-DstDir', \$DstDir) ||
-      die "Requires -DstDir=DIR\n";
-    &Foo($SrcDir, $DstDir);
+    chomp($SrcDir=`pwd`);
+    &GetPatchedFiles($SrcDir);
+#     &ArgvHasUniqueOpt('-SrcDir', \$SrcDir) ||
+#       die "Requires -SrcDir=DIR\n";
+#     &ArgvHasUniqueOpt('-DstDir', \$DstDir) ||
+#       die "Requires -DstDir=DIR\n";
+#     &Foo($SrcDir, $DstDir);
     
   } elsif (grep { /^-Init$/ } @ARGV) {
     
@@ -709,16 +505,51 @@ chomp($_ = `pwd`);
     &HgRefreshAll($_, );
   } elsif (grep { /^-ContinueRefresh$/ } @ARGV) {
     &HgContinueRefresh($_);
+  } elsif (grep { /^-PushAll$/ } @ARGV) {
+    my (@MqSeries) = grep { chomp } Piped("hg qseries", "Get current qseries");
+    my (@MqApplied) = grep { chomp } Piped("hg qapplied", "Get applied patches");
+    map { my($x) = shift @MqSeries;
+          $x eq $_ || die "hg qapplied does not look like declared qseries!\n";
+        } @MqApplied;
+    print "Starting import at $MqSeries[0]\n";
+    &HgPushLoop(@MqSeries);
   } elsif (grep { /^-Merge3$/ } @ARGV) {
     my (@Rejected) = grep { chomp } Piped("hg stat -un", "Get list of rejected chunks");
-    my ($BaseRev, $CurrRev);
-    my ($RepoDir) = '';
-    &ArgvHasUniqueOpt('-BaseRev', \$BaseRev) || die "requries -BaseRev=REV\n";
-    &ArgvHasUniqueOpt('-CurrRev', \$CurrRev) || die "requries -CurrRev=REV\n";
-    &Merge3($RepoDir, $BaseRev, $CurrRev, @Rejected);
+    my ($OrigRev, $CurrRev);
+    my ($RepoDir)= '';
+    chomp($RepoDir=`pwd`);
+
+    if (! &ArgvHasUniqueOpt('-OrigRev', \$OrigRev)) {
+      chdir ".hg/patches";
+      my(%MQRev) = &GetHgLog('');
+      my(@Branches) = split(" ", $MQRev{branches});
+      my($Branch, $MqBranch);
+
+      foreach $Branch  (@Branches) {
+        $MqBranch = $Branch;
+        if ($Branch =~ /^svn([0-9]+)$/) {
+          $OrigRev = "svnrev($1)";         last;
+        } elsif ($Branch =~ /^tag(.*)$/) {
+          $OrigRev = $1;         last;
+        } elsif ($Branch =~ /^rev(.*)$/) {
+          $OrigRev = $1; last;
+        }
+      }
+      print "Considering -OrigRev $OrigRev (discovered from mq repo)\n";
+      chdir $RepoDir;
+      %MQRev = &GetHgLog($OrigRev);
+      (&GetRevName(%MQRev) eq $MqBranch)
+        || die "requires -OrigRev=REV (is: $OrigRev vs $MqBranch - the original rev from which the rebase started)\n";
+    }
+    chdir $RepoDir;
+    my (%QParent) = &GetHgLog('qparent');
+    $CurrRev = &GetRevName(%QParent);
+    $CurrRev ne '' || &ArgvHasUniqueOpt('-CurrRev', \$CurrRev)
+      || die "Need a valid qparent tag. -CurrRev=REV\n";
+    &Merge3($RepoDir, $OrigRev, $QParent{rev}, @Rejected);
 
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
-    my ($Rev);
+    my ($Rev) = '';
     my ($RepoRoot) = $_;
     if (! &ArgvHasUniqueOpt('-BaseRev', \$Rev)) {
       print "No -BaseRev specified. Seeing if rev qparent exists..\n";
@@ -807,7 +638,8 @@ chomp($_ = `pwd`);
     print "-Refresh/-Rebase\n" .
       "  attempts to start a new rebase operation on the current revision\n\n" .
         "  If the automated rebase fails, run the following\n";
-    
+    print "-PushAll\n" .
+      "  push all patches, stop at end or right before the special STOP patch\n";
     print "-Merge3\n" .
       "  -RepoDir=DIR\n" .
       "  -OrigRev=REV\n" .

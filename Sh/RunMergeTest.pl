@@ -25,7 +25,7 @@ chdir "hg/llvm/llvm-trunk";
 $_ = `pwd`; chomp;
 Shell("hg qpop -a", "find base SVN rev");
 my (%Log) = &GetHgLog('');
-Shell("hg qpush -a", "Push current set og patchs");
+Shell("hg qpush -a", "Push current set of patchs");
 chdir $NaCl;
 
 $Rev = &GetRevName(%Log);
@@ -41,6 +41,6 @@ print "SUCCESS WITH REV $Rev\n";
 print "Now saving the artifacts\n";
 &Shell("./save-test-artifacts.pl ${Rev}");
 
-&TagRepo($_, $Log{rev}, "TestsPassed");
+&TagRepo($_, $Log{rev}, "TestAllPassed");
 
 exit(0);
