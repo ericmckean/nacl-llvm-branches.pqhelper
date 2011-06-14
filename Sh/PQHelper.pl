@@ -381,17 +381,6 @@ sub VerifyDiffIsWhite() {
 };
 
 
-sub SubChunkHasNonBlankDelta() {
-  my ($DiffLevel, @SubChunk) = (@_);
-  foreach $Line (@SubChunk) {
-    # skip lines that look like nested SubChunk headers
-    next if ($Line =~ /^[+-]{$DiffLevel}(\+\+|--) /x);
-    if ($Line =~ /^[+-]{$DiffLevel}.*\S.*$/x) {
-      return 1;
-    }
-   }
-  return 0;
-}
 
 
 sub HgTrackPatch {
@@ -404,7 +393,7 @@ sub HgTrackPatch {
     grep { !/(orig|rej)$/ }
     grep { /^\?/ } @Files;
   Shell("hg add ${\(join(' ', @ToBeAdded))}", "ADD These NEW FILES") if ($#ToBeAdded >= 0);
-  Shell("hg delete ${\(join(' ', @ToBeDeleted))}", "FORGET THESE OLD FILES") if ($#ToBeDeleted >= 0);
+  Shell("hg remove ${\(join(' ', @ToBeDeleted))}", "FORGET THESE OLD FILES") if ($#ToBeDeleted >= 0);
 }
 
 sub GetPatchedFiles {
@@ -607,13 +596,18 @@ chomp($_ = `pwd`);
     }
   } elsif (grep { /^-Log$/ } @ARGV) {
     my (@Revs) = &ArgvHasOpt('-r');
-    my (%Rtn);
+    my ($RepoDir) = '';
+    if (&ArgvHasUniqueOpt('-R', \$RepoDir)) {
+      print "Using dir $RepoDir\n";
+      chdir $RepoDir;
+    }    
+    my (%Rtn, $Rev);
 
     if ($#Revs >= 0) {
-      foreach (@Revs) {
+      foreach $Rev (@Revs) {
         ##$_ = substr($_,2);
-        print "Trying REV $_\n";
-        %Rtn = &GetHgLog($_);
+        print "Trying REV $Rev\n";
+        %Rtn = &GetHgLog($Rev);
         &WriteLog(\ %Rtn);
       }
     } else {
@@ -650,7 +644,7 @@ chomp($_ = `pwd`);
     print "-CommitRefresh\n" .
       "  -BaseRev=REV\n";
 
-    print "-Log (-rREV)\n";
+    print "-Log (-rREV) (-R RepoDir) \n";
     print "-Clean -- be careful of files hidden from view via .hgignore\n";
     print "\n";
     print "-StripAllWhiteSpace FILES...\n" .

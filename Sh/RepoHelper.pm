@@ -25,7 +25,7 @@ BEGIN {
                     &SaveTestArtifacts &WriteLog 
                     &MergePatchHeader &GetRevName
                     &TagRepo &Merge3 &HgPushLoop &HgGetUnknownFiles
-                    &HgCommitMqRefresh
+                    &HgCommitMqRefresh &SubChunkHasNonBlankDelta
                     &ProcessPatch &StripWhiteSpace &StripAllWhiteSpace
                     &ArgvHasFlag &ArgvHasOpt &ArgvHasUniqueOpt);
   %EXPORT_TAGS = ( );           # eg: TAG => [ qw!name1 name2! ],
@@ -186,7 +186,7 @@ sub ProcessPatch () {
   foreach $Line (@Lines) {
     if ($Line =~ /^diff /) {
       $DiffStart = $Line;
-      push @Rtn, &$Func($Arg, @Chunk) if ($#Chunk > 0);
+      push @Rtn, &$Func($Arg, @Chunk) if ($#Chunk > 0 && $Chunk[0]=~ /^diff /);
       # clear Chunk out for next bit
       @Chunk = ();
     }
@@ -250,6 +250,19 @@ sub StripAllWhiteSpace() {
 
   return @DstChunk;
 };
+
+sub SubChunkHasNonBlankDelta() {
+  my ($DiffLevel, @SubChunk) = (@_);
+  my ($Line);
+  foreach $Line (@SubChunk) {
+    # skip lines that look like nested SubChunk headers
+    next if ($Line =~ /^[+-]{$DiffLevel}(\+\+|--) /x);
+    if ($Line =~ /^[+-]{$DiffLevel}.*\S.*$/x) {
+      return 1;
+    }
+   }
+  return 0;
+}
 
 sub StripWhiteSpaceChangesInSubChunk() {
   # strips all isolated whitespace changes
@@ -384,9 +397,9 @@ sub ArgvHasOpt {
       $seenOption = 0;
     } elsif (/^${flag}$/) {
       $seenOption = 1;
-    } elsif (/${flag}=(.*)$/) {
+    } elsif (/^${flag}=(.*)$/) {
       push (@Rtn, $1);
-    } elsif (/${flag}(.*)$/) {
+    } elsif (/^${flag}(.*)$/) {
       push (@Rtn, $1);
     }
   }
