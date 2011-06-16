@@ -27,6 +27,7 @@ BEGIN {
                     &TagRepo &Merge3 &HgPushLoop &HgGetUnknownFiles
                     &HgCommitMqRefresh &SubChunkHasNonBlankDelta
                     &ProcessPatch &StripWhiteSpace &StripAllWhiteSpace
+                    &AdjustSubchunkHeader &AdjustAllSubchunkHeaders
                     &ArgvHasFlag &ArgvHasOpt &ArgvHasUniqueOpt);
   %EXPORT_TAGS = ( );           # eg: TAG => [ qw!name1 name2! ],
 
@@ -192,7 +193,7 @@ sub ProcessPatch () {
     }
     push @Chunk, $Line;
   }
-  push @Rtn, &$Func($Arg, @Chunk)  if ($#Chunk >= 2);
+  push @Rtn, &$Func($Arg, @Chunk) if ($#Chunk >= 2);
   return @Rtn;
 }
 
@@ -336,6 +337,61 @@ sub StripWhiteSpaceChangesInSubChunk() {
       print "$Types[$_]: ", $SubChunk[$_];
     }
     print "\n";
+  }
+  return @SubChunk;
+}
+
+sub AdjustAllSubchunkHeaders {
+  # in place operation
+  my ($File, @Chunk) = (@_);
+  my ($Shift) = 0;
+  my (@SubChunk, @DstChunk);
+  my $i;
+  ($#Chunk >= 2) || die "@Chunk is incomplete";
+  push @DstChunk, shift @Chunk;
+  push @DstChunk, shift @Chunk;
+  push @DstChunk, shift @Chunk;
+
+  $i = 0; # don't worry about the header
+  while ($i <= $#Chunk) {
+    my $Line = $Chunk[$i];
+    if ($Line =~ /^@@ /) {
+      if ($#SubChunk > 2)  { # to avoid calling this routine at the very start...
+        push @DstChunk, &AdjustSubchunkHeader(\$Shift, @SubChunk);
+      }
+      @SubChunk = ();
+    }
+    push @SubChunk, $Line;
+  } continue {
+    $i++;
+  }
+
+  if ($#SubChunk > 2) {
+    push @DstChunk, &AdjustSubchunkHeader(\$Shift, @SubChunk);
+  }
+  print $File @DstChunk if ($#DstChunk > 2 && $File ne '');
+  return @Chunk;
+}
+
+sub AdjustSubchunkHeader {
+  my ($rtn, @SubChunk) = (@_);
+  my ($i, $add, $sub) = (1, 0,0);
+  if ($SubChunk[0] =~ /^@@\s*\-([0-9]+)(,([0-9]+)?)?(\s+\+([0-9]+)(,([0-9]+)?)?)?\s*@@/) {
+    my ($SrcLine,$SrcMod,$DstLine,$DstMod) = ($1, $3, $5, $7);
+    $SrcMod = 1 if ($SrcMod eq '');
+    $DstMod = 1 if ($DstMod eq '');
+    $DstLine = $SrcLine + ${$rtn} if ($DstLine eq '');
+    while ($i <= $#SubChunk) {
+      next if ($SubChunk[$i] =~ /^ /);
+      $sub++ if (substr($SubChunk[$i],0,1) eq '-');
+      $add++ if (substr($SubChunk[$i],0,1) eq '+');
+    } continue { $i++; }
+    my($L) = $#SubChunk; # num of lines in subchunk minus header
+    $SrcMod = $L - $add;
+    $DstMod = $L - $sub;
+    ${$rtn} = ${$rtn} + ($DstMod - $SrcMod);
+    $DstLine = $SrcLine;
+    $SubChunk[0] = "@@ -${SrcLine},${SrcMod} +${DstLine},${DstMod} @@\n";
   }
   return @SubChunk;
 }

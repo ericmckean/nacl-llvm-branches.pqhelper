@@ -568,8 +568,9 @@ chomp($_ = `pwd`);
       my (@Lines) = <$Fh>;
       close $Fh;
       open ($Fh, ">${File}.stripped") || die "Unable to create '${File}.stripped'\n";
-      &ProcessPatch(\&StripWhiteSpace, $Fh,
-                    &ProcessPatch(\&StripAllWhiteSpace, '', @Lines));
+      &ProcessPatch(\&AdjustAllSubchunkHeaders, $Fh,
+                    &ProcessPatch(\&StripWhiteSpace, '',
+                                  &ProcessPatch(\&StripAllWhiteSpace, '', @Lines)));
       close($Fh);
       &MergePatchHeader($File, "${File}.stripped", "${File}.stripped");
     }
