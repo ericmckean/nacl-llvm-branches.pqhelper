@@ -101,7 +101,7 @@ sub Merge3Loop {
   &WriteLog($BaseRevLog);
   print "ToRev:\n";
   &WriteLog($CurrRevLog);
-
+  my ($x);
   my ($BaseRevName) = &GetRevName(%$BaseRevLog);
   my ($CurrRevName) =  &GetRevName(%$CurrRevLog);
   foreach $Rej (@Rejected) {
@@ -109,8 +109,6 @@ sub Merge3Loop {
     # A: The $File @ $OrigRev
     # B: apply the .rej  to it
     # C: The current file (which should be at revision $CurrRev)
-
-    Shell("mv $Rej ${TmpDir}", "Copy reject hunk to Output directory");
 
     if (! -e "${RepoDir}/${Dir}/$File") {
       print "File $Rej does not correspond to an existing file in the repo\n";
@@ -120,21 +118,33 @@ sub Merge3Loop {
       print "kdiff3 ${TmpDir}/${File}.$BaseRevName ${TmpDir}/${File}${Suffix} ${Dir}/${File}\n";
       print "MERGE3 STEP*******************\n";
       Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
+      Shell("mv $Rej ${TmpDir}/${Dir}", "Copy reject hunk to Output directory");
+
       Shell("hg cat -r ${$BaseRevLog}{rev} ${Dir}$File -o ${TmpDir}/${Dir}${File}.$BaseRevName",
             "Get version $BaseRevName of  ${Dir}$File");
       Shell("cp ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File}",
             "Copy before patching");
-      &ApplyAllPriorChanges("${Dir}$File", $TmpDir);
+      &ApplyAllPriorChanges("${Dir}$File", $TmpDir, $Dir, $Rej);
       Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File} ${Dir}${File}");
-      Shell("hg qrefresh");
-      &HgCommitMqRefresh($RepoDir, ${$CurrRevLog}{rev});
+      print "kdiff3 finished. Here are the stuff\n";
+      Shell("hg stat", "see the mods");
+      print "Continue? "; $x = <STDIN>;
+      Shell("hg qstat", "see the change to the queue");
+      print "Continue? "; $x = <STDIN>;
+      Shell("hg diff", "see the diff before refresh");
+      print "Continue? "; $x = <STDIN>;
+      Shell("hg qdiff", "Entire change");
+      print "Continue? "; $x = <STDIN>;
     }
   }
+  Shell("hg qrefresh", "refresh the patch");
+  &HgCommitMqRefresh($RepoDir, ${$CurrRevLog}{rev});
+
 }
 
 
 sub ApplyAllPriorChanges {
-  my ($SrcFile, $TmpDir) = @_;
+  my ($SrcFile, $TmpDir, $Dir, $Rej) = @_;
   # cherrypick all 
   my ($PatchFile, @Chunks);
   my (@MqApplied) = grep { chomp } Piped("hg qapplied", "grab all changes to $SrcFile");
@@ -142,13 +152,22 @@ sub ApplyAllPriorChanges {
     my (@Chunk) = &HgGrabChangesTo($PatchFile, $SrcFile);
     push (@Chunks, @Chunk) if ($#Chunk >= 2);
   }
-  open (my $Fh, ">${TmpDir}/${SrcFile}.prior.patch")
-    || die "Unable to create a prior patch for ${SrcFile}\n";
-  print $Fh, @Chunks;
-  close $Fh;
+  print "Now applying the rejected chunk *************************\n";
+  Shell("cat ${TmpDir}/${Rej}", "The rejected chunk");
 
-  Shell("(cd $TmpDir; patch -p1 < ${TmpDir}/${SrcFile}.prior.patch)",
+  if ($#Chunks >= 0) {
+    open (my $Fh, ">${TmpDir}/${SrcFile}.prior.patch")
+      || die "Unable to create a prior patch for ${SrcFile}\n";
+    print $Fh @Chunks;
+    close $Fh;
+    print "Applying the following diff against ${SrcFile} **********************\n";
+    Shell("cat ${TmpDir}/${SrcFile}.prior.patch", "The prior patch");
+    Shell("(cd $TmpDir; patch -p1 < ${TmpDir}/${SrcFile}.prior.patch)",
         "apply the prior patch");
+  } else {
+    Shell("(cd ${TmpDir}/${Dir}; patch -p0 < ${TmpDir}/${Rej})",
+        "apply the rejected hunk");
+  }
 }
 
 sub HgGrabChangesTo {
@@ -162,7 +181,8 @@ sub HgGrabChangesTo {
 sub HgGrabDiffAgainst {
   my ($SrcFile, @Chunk) = (@_);
   ($#Chunk >= 2) || die "@Chunk is incomplete";
-  if ($Chunk[0] =~ /\s${SrcFile}(\s|$)/x) {
+  print "Examining Chunk $Chunk[0]";
+  if ($Chunk[0] =~ /^diff.*\b${SrcFile}\b/x) {
     return @Chunk;
   }
   return ();
