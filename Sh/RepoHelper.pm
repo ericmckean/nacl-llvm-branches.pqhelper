@@ -39,17 +39,19 @@ our @EXPORT_OK;
 END { }       # module clean-up code here (global destructor)
 
 sub TagRepo {
-  my ($RepoRoot, $BaseRev, $Tag) = @_;
+  my ($RepoRoot, $BaseRev, $Tag, $ans) = @_;
+  my ($Orig); chomp($Orig = `pwd`);
   chomp($RepoRoot = `pwd`) if ($RepoRoot eq '');
   chdir $RepoRoot;
   print "Tag the repo with $Tag ? ";
-  my $ans = <STDIN>;
+  $ans = <STDIN> if ($ans eq '');
   if ($ans =~ /y(e(s)?)?/i) {
     Shell("hg qpop -a");
     my (%Log) = &GetHgLog($BaseRev);
     my ($RevName) = &GetRevName(%Log);
     Shell("hg tag -l -r $Log{rev} ${RevName}${Tag}");
   }
+  chdir $Orig;
 }
 
 sub HgPushLoop() {

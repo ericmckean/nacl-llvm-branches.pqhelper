@@ -49,29 +49,46 @@ my ($CROSS_TARGET_X86_64)=qw(x86_64-none-linux-gnu);
 
 print "*********************************\n";
 print "This test is for REVISION $CurrRevTxt\n";
-my (@StartTime) = localtime(time);
+my (@StartTime) = time;
 my (@Part1Time, @LLVMTime, @GccTime, @TestCompileTime, @TestRunTime);
-my ($DoPart1, $DoLLVM, $DoGcc, $DoTest) = (0, 1, 1, 1);
+my ($DoPart1, $DoLLVM, $DoGcc, $DoTest, $TagSuccess) = (0, 1, 1, 1, 0);
 
 $DoLLVM = 0 if (grep { /^-SkipLLVM$/ } @ARGV);
 $DoGcc  = 0 if (grep { /^-SkipGcc$/  } @ARGV);
 $DoTest = 0 if (grep { /^-SkipTest$/ } @ARGV);
 
+$TagSuccess = 1 if (grep { /^-TagSuccess$/ } @ARGV);
+
+sub ReportTime {
+  my (@Times) = @_;
+  my $Message = shift @Times;
+  print "*******************************************************************\n";
+  print "$Message\n";
+  print $Times[1] - $Times[0], " seconds\n";
+  print "*******************************************************************\n";
+}
 
 if ($DoPart1) {
+  push @Part1Time, time;
   &Shell("./tools/llvm/utman.sh clean-install", "");
   &Shell("./tools/llvm/utman.sh clean-logs", "");
   &Shell("./tools/llvm/utman.sh binutils-arm", "");
-  @Part1Time = localtime(time);
+  push @Part1Time, time;
 }
 
 if ($DoLLVM) {
+  push @LLVMTime, "LLVM Compile Time";
+  push @LLVMTime, time;
   &Shell("./tools/llvm/utman.sh llvm-clean", "LLVM clean");
   &Shell("./tools/llvm/utman.sh llvm", "LLVM");
   &Shell("./tools/llvm/utman.sh driver", "");
-  @LLVMTime = localtime(time);
+  push @LLVMTime, time;
+  &ReportTime(@LLVMTime);
+  &TagRepo($LLVMRepo, $LLVMLog{rev}, "CompileSuccess", "y") if ($TagSuccess);
 }
 if ($DoGcc) {
+  push @GccTime, "llvm-gcc compilation time"; 
+  push @GccTime, time;
   &Shell("./tools/llvm/utman.sh  gcc-stage1-clean ${CROSS_TARGET_ARM}", "CLEAN llvm-gcc");
   &Shell("./tools/llvm/utman.sh  gcc-stage1-clean ${CROSS_TARGET_X86_32}", "CLEAN llvm-gcc");
   &Shell("./tools/llvm/utman.sh  gcc-stage1-clean ${CROSS_TARGET_X86_64}", "CLEAN llvm-gcc");
@@ -82,10 +99,14 @@ if ($DoGcc) {
   &Shell("./tools/llvm/utman.sh  rebuild-pnacl-libs", "");
   &Shell("./tools/llvm/utman.sh misc-tools", "");
   &Shell("./tools/llvm/utman.sh  verify", "");
-  @GccTime = localtime(time);
+  push @GccTime, time;
+  &ReportTime(@GccTime);
+  &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "CompileSuccess", "y") if ($TagSuccess);
 }
 
 if ($DoTest) {
+  push @TestCompileTime, "Test Compilation Time";
+  push @TestCompileTime, time;
   &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 -j8", "");
   &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  -j8", "");
   &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1  -j8", "");
@@ -93,11 +114,16 @@ if ($DoTest) {
   &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1  -j8", "");
   &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1  -j8", "");
   &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1  -j8");
+  push @TestCompileTime, time;
+  &ReportTime(@TestCompileTime);
 
-
+  &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestCompileSuccess", "y") if ($TagSuccess);
+  &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "TestCompileSuccess", "y") if ($TagSuccess);
   print "**********************************************************************\n" .
     "DONE WITH BUILD\n***********************************************************\n";
 
+  push @TestRunTime, "Test Run Time";
+  push @TestRunTime, time;
   &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1  -j8", "");
   &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  -j8", "");
   &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 -j8", "");
@@ -105,6 +131,8 @@ if ($DoTest) {
   &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1 -j8 smoke_tests", "");
   &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1 -j8  smoke_tests", "");
   &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1 -j8 smoke_tests", "");
+  &ReportTime(@TestRunTime);
+  push @TestRunTime, time;
 
   print "SUCCESS WITH REV $LLVMRev\n";
   print "Now saving the artifacts\n";
