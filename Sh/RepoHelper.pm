@@ -115,17 +115,27 @@ sub Merge3Loop {
     } else {
       print "MERGE3 STEP*******************\n";
       print "If the next step fails, you have no choice but to manually merge3 the following:\n";
-      print "kdiff3 ${TmpDir}/${File}.$BaseRevName ${TmpDir}/${File}${Suffix} ${Dir}/${File}\n";
+      print "kdiff3 ${TmpDir}/${File}.$BaseRevName ${TmpDir}/${Dir}${File}${Suffix} ${Dir}/${File}\n";
       print "MERGE3 STEP*******************\n";
       Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
-      Shell("mv $Rej ${TmpDir}/${Dir}", "Copy reject hunk to Output directory");
+      Shell("mv $Rej ${TmpDir}/${Dir}", "Move reject hunk to Output directory");
 
       Shell("hg cat -r ${$BaseRevLog}{rev} ${Dir}$File -o ${TmpDir}/${Dir}${File}.$BaseRevName",
             "Get version $BaseRevName of  ${Dir}$File");
-      Shell("cp ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File}",
-            "Copy before patching");
-      &ApplyAllPriorChanges("${Dir}$File", $TmpDir, $Dir, $Rej);
-      Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File} ${Dir}${File}");
+      if ($BaseRevName ne $CurrRevName) {
+        print "Merging from $BaseRevName to $CurrRevName\n";
+        Shell("cp ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File}",
+              "Copy before patching");
+        &ApplyAllPriorChanges("${Dir}$File", $TmpDir, $Dir, $Rej);
+        Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File} ${Dir}${File}");
+      } else {
+        print "Merging current patch for 1 revision $BaseRevName.\n";
+        print "MERGE3 STEP*******************\n";
+        print "THIS IS A TWO WAY MERGE. TWO EDITOR WINDOWS OPENING\n";
+        Shell("$ENV{EDITOR} ${TmpDir}/${Dir}${File}${Suffix}&", "Start edit of ${TmpDir}/${Dir}${File}${Suffix}");
+        Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${Dir}/${File}", "suboptimal 2way merge");
+        print "MERGE3 STEP*******************\n";
+      }
       print "kdiff3 finished. Here are the stuff\n";
       Shell("hg stat", "see the mods");
       print "Continue? "; $x = <STDIN>;
