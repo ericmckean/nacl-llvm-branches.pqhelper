@@ -550,7 +550,7 @@ chomp($_ = `pwd`);
 
     my ($CurrRevName) = &GetRevName(%QParentLog);
     my (@Targets) = grep { -f $_ && -r $_ } grep { ! /^-.*$/ } @ARGV;
-    my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgremerge.${OrigRevName}.${CurrRevName}.XXXXX", CLEANUP => 0));
+    my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgmergeone.${OrigRevName}.${CurrRevName}.XXXXX", CLEANUP => 0));
     foreach $Target (@Targets) {
       &MergeOneFileAlt($RepoDir, \%OrigRevLog, \%QParentLog, $Target, $TmpDir);
     }
@@ -653,10 +653,17 @@ chomp($_ = `pwd`);
     print "-PushAll\n" .
       "  push all patches, stop at end or right before the special STOP patch\n";
     print "-Merge3\n" .
-      "  -RepoDir=DIR\n" .
       "  -OrigRev=REV\n" .
-      "  -CurrRev=REV\n" .
+      "  Find all .rej hunks and do a -MergeOneFile -OrigRev=REV FILE for all of them\n".
+      "  each of the FILES. You will also likely need a -OrigRev argument\n" .
       " \n";
+    print "-MergeOneFile   FILES ...\n" .
+      "  -OrigRev=REV\n" .
+      "  Merge3 all listed files one at a time\n" .
+      "  The current set of applied patches must have at least one chunk against each file\n" .
+      "  The three revs being merged will be FILE.OrigRev+{all but last patch} FILE.OrigRev+{all patches} + FILE.CurrRev\n".
+      " \n";
+
     print "-ContinueRefresh\n" .
       " Attempts to continue the refresh operation\n";
     print "-CommitRefresh\n" .

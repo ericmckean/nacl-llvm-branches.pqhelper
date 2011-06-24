@@ -275,7 +275,7 @@ sub Merge3 {
   my ($BaseRevName) = &GetRevName(%BaseRevLog);
   my ($CurrRevName) = &GetRevName(%CurrRevLog);
 
-  my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgmerge.$BaseRevName.$CurrRevName.XXXXXX", CLEANUP => 0));
+  my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgmergeall.$BaseRevName.$CurrRevName.XXXXXX", CLEANUP => 0));
   &Merge3Loop($RepoDir, \%BaseRevLog, \%CurrRevLog, $TmpDir, @Rejected);
 }
 
