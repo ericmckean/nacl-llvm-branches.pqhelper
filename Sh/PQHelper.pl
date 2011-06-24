@@ -490,7 +490,7 @@ chomp($_ = `pwd`);
                                 $DstRepo, $DstBaseRev, $Where, $FirstParent);
   } elsif (grep { /^-Track$/ } @ARGV) {
     &HgTrackPatch($_);
-  } elsif (grep { /^-Refresh$/ } @ARGV) {
+  } elsif (grep { /^(-Refresh|-Rebase)$/ } @ARGV) {
     &HgRefreshAll($_, );
   } elsif (grep { /^-ContinueRefresh$/ } @ARGV) {
     &HgContinueRefresh($_);
@@ -503,7 +503,8 @@ chomp($_ = `pwd`);
     print "Starting import at $MqSeries[0]\n";
     &HgPushLoop(@MqSeries);
   } elsif (grep { /^-Merge3$/ } @ARGV) {
-    my (@Rejected) = grep { chomp } Piped("hg stat -un", "Get list of rejected chunks");
+    my (@Rejected) = grep { /\.rej$/ }
+      grep { chomp } Piped("hg stat -un", "Get list of rejected chunks");
     my ($OrigRev, $CurrRev);
     my ($RepoDir)= '';
     chomp($RepoDir=`pwd`);
@@ -537,6 +538,22 @@ chomp($_ = `pwd`);
       || die "Need a valid qparent tag. -CurrRev=REV\n";
     &Merge3($RepoDir, $OrigRev, $QParent{rev}, @Rejected);
 
+  } elsif (grep { /^-MergeOneFile$/ } @ARGV)  {
+    my ($OrigRev, $CurrRev);
+    my ($RepoDir)= '';
+    chomp($RepoDir=`pwd`);
+
+    die "Requires -OrigRev=REV\n" if (! &ArgvHasUniqueOpt('-OrigRev', \$OrigRev));
+    my(%OrigRevLog) = &GetHgLog($OrigRev);
+    my ($OrigRevName) = &GetRevName(%OrigRevLog);
+    my (%QParentLog) = &GetHgLog('qparent');
+
+    my ($CurrRevName) = &GetRevName(%QParentLog);
+    my (@Targets) = grep { -f $_ && -r $_ } grep { ! /^-.*$/ } @ARGV;
+    my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgremerge.${OrigRevName}.${CurrRevName}.XXXXX", CLEANUP => 0));
+    foreach $Target (@Targets) {
+      &MergeOneFileAlt($RepoDir, \%OrigRevLog, \%QParentLog, $Target, $TmpDir);
+    }
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
     my ($Rev) = '';
     my ($RepoRoot) = $_;

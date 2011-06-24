@@ -24,7 +24,9 @@ BEGIN {
   @EXPORT      = qw(&GetRepoRoot &QuoteIt &Shell &Piped &GetHgLog 
                     &SaveTestArtifacts &WriteLog 
                     &MergePatchHeader &GetRevName
-                    &TagRepo &Merge3 &HgPushLoop &HgGetUnknownFiles
+                    &TagRepo 
+                    &Merge3 &MergeOneFile &MergeOneFileAlt
+                    &HgPushLoop &HgGetUnknownFiles
                     &HgCommitMqRefresh &SubChunkHasNonBlankDelta
                     &ProcessPatch &StripWhiteSpace &StripAllWhiteSpace
                     &AdjustSubchunkHeader &AdjustAllSubchunkHeaders
@@ -80,6 +82,189 @@ sub HgGetUnknownFiles() {
   return @Files;
 }
 
+sub MergeOneFile {
+  my ($RepoDir, $BaseRevLog, $CurrRevLog, $Target, $TmpDir) = @_;
+  my ($File, $Dir) = &fileparse($Target);
+  my ($Orig); chomp($Orig = `pwd`);
+  chdir $RepoDir;
+  print "Refresh/Rebase Merge, working dir $TmpDir for file $Target\n";
+  print "FromMqRev:\n";
+  &WriteLog($BaseRevLog);
+  print "ToRev:\n";
+  &WriteLog($CurrRevLog);
+
+  my ($BaseRevName) = &GetRevName(%$BaseRevLog);
+  my ($CurrRevName) =  &GetRevName(%$CurrRevLog);
+
+  die "File ${RepoDir}/${Target}  does not correspond to an existing file in the repo\n"
+    if (! -e "${RepoDir}/${Target}");
+
+  my @MqStatus = grep { chomp } Piped("hg -R .hg/patches stat -n", "get mqrepo status");
+
+  Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
+  Shell("hg cat -r ${$BaseRevLog}{rev} ${Target} -o ${TmpDir}/${Target}.${BaseRevName}",
+        "Get version $BaseRevName of  ${Target}");
+  Shell("cp ${TmpDir}/${Target}.$BaseRevName ${TmpDir}/${Target}",
+        "Copy before patching");
+
+  my (@MqApplied) = grep { chomp } Piped("hg qapplied", "get applied patch sequence");
+  my (@MqOrig);
+  my ($Patch);
+  foreach $Patch (@MqApplied) {
+    Shell("hg cat -R .hg/patches -r $BaseRevName .hg/patches/$Patch -o ${TmpDir}/${Dir}${Patch}.${BaseRevName}",
+          "Get version $BaseRevName of $Patch");
+    push @MqOrig, "${TmpDir}/${Dir}${Patch}.${BaseRevName}";
+  }
+  my (@Chunks);
+  foreach $Patch (@MqOrig) {
+    my (@Chunk) = &HgGrabChangesTo($Patch, $Target);
+    push (@Chunks, @Chunk) if ($#Chunk >= 2);
+  }
+  # generate two sets of 
+  if ($#Chunks >= 0) {
+    open (my $Fh, ">${TmpDir}/${Target}.${BaseRevName}.patch")
+      || die "Unable to create a prior patch for ${TmpDir}/${Target}\n";
+    print $Fh @Chunks;
+    close $Fh;
+    &ApplyPatch("${TmpDir}/${Target}.${BaseRevName}.patch", $Target, $TmpDir, "-p1");
+  }
+  Shell("kdiff3 ${TmpDir}/${Target}.${BaseRevName} ${TmpDir}/${Target} ${Target}",
+        "run the merge3");
+  chdir $Orig;
+}
+
+sub MergeOneFileAlt {
+  my ($RepoDir, $BaseRevLog, $CurrRevLog, $Target, $TmpDir) = @_;
+  my ($File, $Dir) = &fileparse($Target);
+  my ($Orig); chomp($Orig = `pwd`);
+  chdir $RepoDir;
+  print "Refresh/Rebase Merge, working dir $TmpDir for file $Target\n";
+  print "FromMqRev:\n";
+  &WriteLog($BaseRevLog);
+  print "ToRev:\n";
+  &WriteLog($CurrRevLog);
+
+  my ($BaseRevName) = &GetRevName(%$BaseRevLog);
+  my ($CurrRevName) =  &GetRevName(%$CurrRevLog);
+
+  die "File ${RepoDir}/${Target}  does not correspond to an existing file in the repo\n"
+    if (! -e "${RepoDir}/${Target}");
+
+  Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
+  Shell("hg cat -r ${$BaseRevLog}{rev} ${Target} -o ${TmpDir}/${Target}.${BaseRevName}",
+        "Get version $BaseRevName of  ${Target}");
+
+  my (@MqApplied) = grep { chomp } Piped("hg qapplied", "get applied patch sequence");
+  my (@MqOrig);
+  my ($Patch, $i);
+  foreach $Patch (@MqApplied) {
+    Shell("hg cat -R .hg/patches -r $BaseRevName .hg/patches/$Patch -o ${TmpDir}/${Dir}${Patch}.${BaseRevName}",
+          "Get version $BaseRevName of $Patch");
+    push @MqOrig, "${TmpDir}/${Dir}${Patch}.${BaseRevName}";
+  }
+  my (@PatchesToTarget);
+  foreach $Patch (@MqOrig) {
+    my (@Chunk) = &HgGrabChangesTo($Patch, $Target);
+    push (@PatchesToTarget, \@Chunk); # if ($#Chunk >= 2);
+  }
+  # generate two sets of merged files
+  #
+  my (@PatchSeq) = &GenTwoPatches($TmpDir, $Target, $BaseRevName, 
+                                  $CurrRevName,
+                                  \@PatchesToTarget, \@MqApplied);
+  foreach $i (0 .. $#PatchSeq) {
+    if (-r $PatchSeq[$i]) {
+      $Patch = $PatchSeq[$i];
+      Shell("cp ${TmpDir}/${Target}.$BaseRevName ${TmpDir}/${Target}",
+            "Copy before patching (pass $i)");
+
+      &ApplyPatch($Patch, "${Target}.${i}", $TmpDir, "-p1");
+      Shell("cp ${TmpDir}/$Target ${TmpDir}/${Target}.${BaseRevName}.${i}",
+            "save the results ");
+    } else {
+      Shell("cp ${TmpDir}/$Target.${BaseRevName} ${TmpDir}/${Target}.${BaseRevName}.${i}",
+            "No patch, so copy instead (pass $i)");
+    }
+  }
+  Shell("kdiff3 ${TmpDir}/${Target}.${BaseRevName}.0 ${TmpDir}/${Target}.${BaseRevName}.1 ${Target}",
+        "run the merge3");
+  my ($x);
+  print "kdiff3 finished. Here is the repo status\n";
+  Shell("hg stat", "see the mods");
+
+  print "Continue to see the mq status? "; $x = <STDIN>;
+  Shell("hg qstat", "see the change to the queue");
+
+  print "Continue to see current diff? "; $x = <STDIN>;
+  Shell("hg diff", "see the diff before refresh");
+  print "Continue? "; $x = <STDIN>;
+  print "If you are done with this patch, don't forget to the following\n";
+  print "  hg qrefresh\n";
+  print "  $::PROGRAM_NAME -CommitRefresh\n";
+  chdir $Orig;
+}
+
+# Routine takes an array of of specific patches against $Target
+# It generates two patches against target. The SECOND one contains
+# all diff chunks. The FIRST one contains all but the last chunk.
+# this is hopefully to show in merge3 the difference between patch set 
+# N-1 and N
+sub GenTwoPatches {
+  my ($TmpDir, $Target, $BaseRevName, $CurrRevName, $PatchesToTargetOrig, $PatchNames) = @_;
+  my @Rtn;
+  my $_;
+  die "Total of ${\($#{$PatchesToTargetOrig}+1)} diffs against $Target but ${\($#{$PatchNames}+1)} patches!\n"
+    if ($#{$PatchesToTargetOrig} != $#{$PatchNames});
+  my (@PatchIdx) = 0; my($i) =0;
+  my (@PatchesToTarget) = grep {
+    print "Patch $i (from ${$PatchNames}[$i])\n";
+    print @{$_};
+    if ($#{$_} > -1) {
+      print "Grabbed a diffchunk against $Target from @{$PatchNames}[$i] [$i]\n";
+      push @PatchIdx, $i;
+      $i++;
+      1;
+    } else {
+      $i++;
+      0;
+    }
+  } @{$PatchesToTargetOrig};
+
+  die "There are no diffs against $Target in the following:\n" .
+    join("\n\t", @{$PatchNames}) . "\n" if ($#PatchesToTarget == -1);
+  print "There are ${\($#PatchesToTarget+1)} diffchunks for $Target from ${\($#{$PatchNames}+1)} patches\n";
+  die "Not enough patches to $Target!\n" if ($#PatchesToTarget == -1);
+  
+  # It's a lie. There can only be two.
+  # 
+  my ($x) = $#PatchesToTarget -1;
+  my ($j) = 0; $i = 0;
+  while ($x <= $#PatchesToTarget) {
+    my $PatchName = "${TmpDir}/${Target}.${BaseRevName}.${j}.patch";
+    if ($x < 0) {
+      print "Since there is only ${\($#PatchesToTarget+1)} patche to $Target. The first one is empty\n";
+      push @Rtn, '';
+      next;
+    } else {
+       push @Rtn, $PatchName;
+    }
+    Shell("rm -f ${PatchName}", "clear before creating new patch");
+    print "PatchName = $PatchName\n";
+    for $i (0 .. ($x)) {
+      my ($PatchRef) = $PatchesToTarget[$i];
+      my $Line;
+      print "Grabbing patch to $Target from ${$PatchNames}[$PatchIdx[$i]], saving it to $PatchName\n";
+      open (my $Fh, ">>$PatchName")
+        || die "Unable to create a prior patch for ${TmpDir}/${Target} (from ${$PatchNames}[$PatchIdx[$i]], seq $j)\n";
+      for $Line (@{$PatchRef}) {
+        print $Fh $Line;
+      }
+      close $Fh;
+    }
+  } continue { $x++; $j++; };
+  return @Rtn;
+}
+
 sub Merge3 {
   my ($RepoDir, $BaseRev, $CurrRev, @Rejected) = @_;
   chomp($RepoDir=`pwd`) if ($RepoDir eq '');
@@ -106,15 +291,25 @@ sub Merge3Loop {
   my ($x);
   my ($BaseRevName) = &GetRevName(%$BaseRevLog);
   my ($CurrRevName) =  &GetRevName(%$CurrRevLog);
+  die "Require -OrigRev=REV (Curr Rev='$CurrRevName'\n"
+    if ($BaseRevName eq $CurrRevName);
   foreach $Rej (@Rejected) {
     my ($File, $Dir, $Suffix) = &fileparse($Rej, @suffixes);
     # A: The $File @ $OrigRev
     # B: apply the .rej  to it
     # C: The current file (which should be at revision $CurrRev)
-
-    if (! -e "${RepoDir}/${Dir}/$File") {
-      print "File $Rej does not correspond to an existing file in the repo\n";
+    my $Target="${Dir}${File}";
+    if (! -e "${RepoDir}/${Dir}$File") {
+      die "File $Rej does not correspond to an existing file in the repo. Please fix manually\n";
     } else {
+      print "THIS IS A .REJ FILE. TWO EDITOR WINDOWS OPENING\n";
+      Shell("$ENV{EDITOR} ${TmpDir}/${Dir}${File}${Suffix}&", "Start edit of ${TmpDir}/${Dir}${File}${Suffix}");
+      Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
+      Shell("mv $Rej ${TmpDir}/${Dir}", "Move reject hunk to Output directory");
+      &MergeOneFileAlt($RepoDir, $BaseRevLog, $CurrRevLog, $Target, $TmpDir);
+    }
+
+    if (0) {
       print "MERGE3 STEP*******************\n";
       print "If the next step fails, you have no choice but to manually merge3 the following:\n";
       print "kdiff3 ${TmpDir}/${File}.$BaseRevName ${TmpDir}/${Dir}${File}${Suffix} ${Dir}/${File}\n";
@@ -128,7 +323,7 @@ sub Merge3Loop {
         print "Merging from $BaseRevName to $CurrRevName\n";
         Shell("cp ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File}",
               "Copy before patching");
-        &ApplyAllPriorChanges("${Dir}$File", $TmpDir, $Dir, $Rej);
+        &ApplyAllPriorChanges("${Dir}$File", $TmpDir, $Dir, $Rej, $BaseRevName);
         Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File} ${Dir}${File}");
       } else {
         print "Merging current patch for 1 revision $BaseRevName.\n";
@@ -138,53 +333,52 @@ sub Merge3Loop {
         Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${Dir}/${File}", "suboptimal 2way merge");
         print "MERGE3 STEP*******************\n";
       }
-      print "kdiff3 finished. Here are the stuff\n";
-      Shell("hg stat", "see the mods");
-      print "Continue? "; $x = <STDIN>;
-      Shell("hg qstat", "see the change to the queue");
-      print "Continue? "; $x = <STDIN>;
-      Shell("hg diff", "see the diff before refresh");
-      print "Continue? "; $x = <STDIN>;
-      Shell("hg qdiff", "Entire change");
-      print "Continue? "; $x = <STDIN>;
     }
   }
+  print "About to see entire change... Continue? "; $x = <STDIN>;
+  Shell("hg qdiff", "Entire change");
+  print "Continue? "; $x = <STDIN>;
+
   Shell("hg qrefresh", "refresh the patch");
   &HgCommitMqRefresh($RepoDir, ${$CurrRevLog}{rev});
 
 }
 
-
 sub ApplyAllPriorChanges {
-  my ($SrcFile, $TmpDir, $Dir, $Rej) = @_;
+  my ($SrcFile, $TmpDir, $Dir, $Rej, $BaseRevName) = @_;
   # cherrypick all 
   my ($PatchFile, @Chunks);
   my (@MqApplied) = grep { chomp } Piped("hg qapplied", "grab all changes to $SrcFile");
   foreach $PatchFile (@MqApplied) {
-    my (@Chunk) = &HgGrabChangesTo($PatchFile, $SrcFile);
+    my (@Chunk) = &HgGrabChangesTo(".hg/patches/$PatchFile", $SrcFile);
     push (@Chunks, @Chunk) if ($#Chunk >= 2);
   }
   print "Now applying the rejected chunk *************************\n";
   Shell("cat ${TmpDir}/${Rej}", "The rejected chunk");
-
+  my ($x) = <STDIN>;
   if ($#Chunks >= 0) {
     open (my $Fh, ">${TmpDir}/${SrcFile}.prior.patch")
       || die "Unable to create a prior patch for ${SrcFile}\n";
     print $Fh @Chunks;
     close $Fh;
-    print "Applying the following diff against ${SrcFile} **********************\n";
-    Shell("cat ${TmpDir}/${SrcFile}.prior.patch", "The prior patch");
-    Shell("(cd $TmpDir; patch -p1 < ${TmpDir}/${SrcFile}.prior.patch)",
-        "apply the prior patch");
+    &ApplyPatch("${TmpDir}/${SrcFile}.prior.patch", $SrcFile, $TmpDir, "-p1");
   } else {
     Shell("(cd ${TmpDir}/${Dir}; patch -p0 < ${TmpDir}/${Rej})",
         "apply the rejected hunk");
   }
 }
 
+sub ApplyPatch {
+  my ($PatchFile, $TargetFile, $WDir, $PatchArg) = @_;
+  $PatchArg = "-p1" if ($PatchArg eq '');
+  print "Applying the following diff against ${TargetFile} **********************\n";
+  Shell("cat $PatchFile", "The prior patch");
+  Shell("(cd $WDir; patch ${PatchArg} < $PatchFile)", "apply the patch");
+}
+
 sub HgGrabChangesTo {
   my ($PatchFile, $SrcFile) = @_;
-  open (my $Fh, ".hg/patches/$PatchFile") || die "Unable to open patch '$PatchFile' for reading\n";
+  open (my $Fh, $PatchFile) || die "Unable to open patch '$PatchFile' for reading\n";
   my (@Lines) = <$Fh>;
   close $Fh;
   return &ProcessPatch(\ &HgGrabDiffAgainst, $SrcFile, @Lines);
@@ -193,8 +387,9 @@ sub HgGrabChangesTo {
 sub HgGrabDiffAgainst {
   my ($SrcFile, @Chunk) = (@_);
   ($#Chunk >= 2) || die "@Chunk is incomplete";
-  print "Examining Chunk $Chunk[0]";
+  #print "Found Chunk $Chunk[0]";
   if ($Chunk[0] =~ /^diff.*\b${SrcFile}\b/x) {
+    print "Found Chunk $Chunk[0]";
     return @Chunk;
   }
   return ();
@@ -637,6 +832,7 @@ sub GetHgLog {
     my $Key = $1;
     my $Rest = $2;
     $Rtn{$Key} = $Rest;
+    # print "  $Key -> $Rest\n";
   }
   return %Rtn;
 }
@@ -652,7 +848,7 @@ $Key, ${$Rtn}{$Key}
   my (@keys) = (qw(rev children parents svn tags branches));
   # last line of defense
   foreach (@keys) {
-    die "Something went wrong with quering the repository\n" 
+    die "Something went wrong with quering the repository (key $_ is missing)\n" 
       if (! exists ${$Rtn}{$_});;
   }
 

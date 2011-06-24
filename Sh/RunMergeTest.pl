@@ -53,9 +53,9 @@ my (@StartTime) = time;
 my (@Part1Time, @LLVMTime, @GccTime, @TestCompileTime, @TestRunTime);
 my ($DoPart1, $DoLLVM, $DoGcc, $DoTest, $TagSuccess) = (0, 1, 1, 1, 0);
 
-$DoLLVM = 0 if (grep { /^-SkipLLVM$/ } @ARGV);
-$DoGcc  = 0 if (grep { /^-SkipGcc$/  } @ARGV);
-$DoTest = 0 if (grep { /^-SkipTest$/ } @ARGV);
+$DoLLVM = 0 if (grep { /^-SkipLLVM$/i } @ARGV);
+$DoGcc  = 0 if (grep { /^-SkipGCC$/i  } @ARGV);
+$DoTest = 0 if (grep { /^-SkipTest$/i } @ARGV);
 
 $TagSuccess = 1 if (grep { /^-TagSuccess$/ } @ARGV);
 
