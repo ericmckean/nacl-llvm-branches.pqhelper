@@ -104,6 +104,9 @@ sub MergeOneFile {
   Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
   Shell("hg cat -r ${$BaseRevLog}{rev} ${Target} -o ${TmpDir}/${Target}.${BaseRevName}",
         "Get version $BaseRevName of  ${Target}");
+  Shell("hg cat -r ${$CurrRevLog}{rev} ${Target} -o ${TmpDir}/${Target}.${CurrRevName}",
+        "Get version $CurrRevName of  ${Target}");
+
   Shell("cp ${TmpDir}/${Target}.$BaseRevName ${TmpDir}/${Target}",
         "Copy before patching");
 
@@ -120,7 +123,6 @@ sub MergeOneFile {
     my (@Chunk) = &HgGrabChangesTo($Patch, $Target);
     push (@Chunks, @Chunk) if ($#Chunk >= 2);
   }
-  # generate two sets of 
   if ($#Chunks >= 0) {
     open (my $Fh, ">${TmpDir}/${Target}.${BaseRevName}.patch")
       || die "Unable to create a prior patch for ${TmpDir}/${Target}\n";
@@ -128,8 +130,9 @@ sub MergeOneFile {
     close $Fh;
     &ApplyPatch("${TmpDir}/${Target}.${BaseRevName}.patch", $Target, $TmpDir, "-p1");
   }
-  Shell("kdiff3 ${TmpDir}/${Target}.${BaseRevName} ${TmpDir}/${Target} ${Target}",
+  Shell("kdiff3 ${TmpDir}/${Target} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
         "run the merge3");
+  &Merge3Post($Target);
   chdir $Orig;
 }
 
@@ -188,6 +191,12 @@ sub MergeOneFileAlt {
   }
   Shell("kdiff3 ${TmpDir}/${Target}.${BaseRevName}.0 ${TmpDir}/${Target}.${BaseRevName}.1 ${Target}",
         "run the merge3");
+  &Merge3Post($Target);
+  chdir $Orig;
+}
+
+sub Merge3Post {
+  my ($Target) = @_;
   my ($x);
   print "kdiff3 finished. Here is the repo status\n";
   Shell("hg stat", "see the mods");
@@ -197,11 +206,11 @@ sub MergeOneFileAlt {
 
   print "Continue to see current diff? "; $x = <STDIN>;
   Shell("hg diff", "see the diff before refresh");
-  print "Continue? "; $x = <STDIN>;
+  print "Continue  to see qdiff? "; $x = <STDIN>;
+  Shell("hg qdiff $Target", "see the diff before refresh");
   print "If you are done with this patch, don't forget to the following\n";
   print "  hg qrefresh\n";
   print "  $::PROGRAM_NAME -CommitRefresh\n";
-  chdir $Orig;
 }
 
 # Routine takes an array of of specific patches against $Target

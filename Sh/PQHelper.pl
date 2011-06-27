@@ -541,9 +541,13 @@ chomp($_ = `pwd`);
   } elsif (grep { /^-MergeOneFile$/ } @ARGV)  {
     my ($OrigRev, $CurrRev);
     my ($RepoDir)= '';
+    my ($TryAlt) = 0;
     chomp($RepoDir=`pwd`);
 
+    $TryAlt = &ArgvHasFlag('-TryAlt');
+    print "TryAlt = $TryAlt\n";
     die "Requires -OrigRev=REV\n" if (! &ArgvHasUniqueOpt('-OrigRev', \$OrigRev));
+    
     my(%OrigRevLog) = &GetHgLog($OrigRev);
     my ($OrigRevName) = &GetRevName(%OrigRevLog);
     my (%QParentLog) = &GetHgLog('qparent');
@@ -552,7 +556,13 @@ chomp($_ = `pwd`);
     my (@Targets) = grep { -f $_ && -r $_ } grep { ! /^-.*$/ } @ARGV;
     my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgmergeone.${OrigRevName}.${CurrRevName}.XXXXX", CLEANUP => 0));
     foreach $Target (@Targets) {
-      &MergeOneFileAlt($RepoDir, \%OrigRevLog, \%QParentLog, $Target, $TmpDir);
+      if ($TryAlt) {
+        print "Trying alternate merge3\n"
+        &MergeOneFileAlt($RepoDir, \%OrigRevLog, \%QParentLog, $Target, $TmpDir);
+      } else {
+        print "Trying original merge3\n"
+        &MergeOneFile($RepoDir, \%OrigRevLog, \%QParentLog, $Target, $TmpDir);
+      }
     }
   } elsif (grep { /^-CommitRefresh$/ } @ARGV) {
     my ($Rev) = '';
@@ -560,6 +570,7 @@ chomp($_ = `pwd`);
     if (! &ArgvHasUniqueOpt('-BaseRev', \$Rev)) {
       print "No -BaseRev specified. Seeing if rev qparent exists..\n";
       my %Log = &GetHgLog('qparent');
+
       $Rev = $Log{rev};
     }
     &HgCommitMqRefresh($RepoRoot, $Rev);
@@ -657,8 +668,8 @@ chomp($_ = `pwd`);
       "  Find all .rej hunks and do a -MergeOneFile -OrigRev=REV FILE for all of them\n".
       "  each of the FILES. You will also likely need a -OrigRev argument\n" .
       " \n";
-    print "-MergeOneFile   FILES ...\n" .
-      "  -OrigRev=REV\n" .
+    print "-MergeOneFile  -OrigRev=REV  FILES ...\n" .
+      "  -TryAlt (Try alternate merge strategy)\n" .
       "  Merge3 all listed files one at a time\n" .
       "  The current set of applied patches must have at least one chunk against each file\n" .
       "  The three revs being merged will be FILE.OrigRev+{all but last patch} FILE.OrigRev+{all patches} + FILE.CurrRev\n".
