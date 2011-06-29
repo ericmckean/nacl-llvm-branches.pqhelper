@@ -502,6 +502,18 @@ chomp($_ = `pwd`);
         } @MqApplied;
     print "Starting import at $MqSeries[0]\n";
     &HgPushLoop(@MqSeries);
+  } elsif (grep { /^-up/i } @ARGV) {
+    my ($Rev);
+    die "need -r\n" if (! &ArgvHasUniqueOpt('-r', \$Rev));
+    my (%RevLog) = &GetHgLog($Rev);
+    my ($RevName) = &GetRevName(%RevLog);
+    
+    &Shell("hg qpop -a", "");
+    &Shell("hg -R .hg/patches up -r $RevName", "update mq");
+    &Shell("hg up -r $RevLog{rev}", "update repo");
+    my (@MqSeries) = grep { chomp } Piped("hg qseries", "Get current qseries");
+    &HgPushLoop(@MqSeries);
+
   } elsif (grep { /^-Merge3$/ } @ARGV) {
     my (@Rejected) = grep { /\.rej$/ }
       grep { chomp } Piped("hg stat -un", "Get list of rejected chunks");
@@ -602,7 +614,7 @@ chomp($_ = `pwd`);
       close($Fh);
       &MergePatchHeader($File, "${File}.stripped", "${File}.stripped");
     }
-  } elsif (grep { /^-VerifyDiffIsWhite$/ } @ARGV) {
+  } elsif (grep { /^-ViewDiff$/ } @ARGV) {
     my($DiffLevel) = 1;
     &ArgvHasUniqueOpt('-DiffLevel', \$DiffLevel);
     my (@Patches) = grep { !/^-\w+/ } @ARGV;
@@ -687,13 +699,13 @@ chomp($_ = `pwd`);
      "  Removes all isolated whitespace diffs i.e. not whitespace diffs that are not contiguous\n". 
      "  with real diffs. Uses the DiffLevel argument\n";
 
-    print "-VerifyDiffIsWhite -DiffLevel=NUM PatchesOrCommands)... \n" .
+    print "-ViewDiff -DiffLevel=NUM PatchesOrCommands)... \n" .
      "  Optional DiffLevel argument:\n" . 
      "  -DiffLevel must be a positive integer (1 for main diff, 2 for diff of a diff ...) \n" .
      "  where 1 is a single diff, 2 is a diff of a diff, 3 is a diff or a diff of a diff..\n" .
      "  -DiffLevel > 1 is necessary to discern what happens if your change is to a patch file." .
-     "  -VerifyDiffIsWhite smartly ignores changes to nested context lines.\n" .
-     "  For example: -VerifyDiffIsWhite -DiffLevel=2 'diff -u A.patch B.patch'" .
+     "  -ViewDiff smartly ignores changes to nested context lines.\n" .
+     "  For example: -ViewDiff -DiffLevel=2 'diff -u A.patch B.patch'" .
      "   examines the lines resulting from diff -u A.patch B.patch | egrep '^[+-]{2}' | egrep -v '^[+-]{2}(\+\+|--) '\n";
   }
 

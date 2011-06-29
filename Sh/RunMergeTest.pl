@@ -51,11 +51,13 @@ print "*********************************\n";
 print "This test is for REVISION $CurrRevTxt\n";
 my (@StartTime) = time;
 my (@Part1Time, @LLVMTime, @GccTime, @TestCompileTime, @TestRunTime);
-my ($DoPart1, $DoLLVM, $DoGcc, $DoTest, $TagSuccess) = (0, 1, 1, 1, 0);
+my ($DoPart1, $DoLLVM, $DoGcc, $DoTest, $DoSpec, $TagSuccess) = (1, 1, 1, 1, 1, 0);
 
+$DoPart1 = 0 if (grep { /^-SkipPart1$/i } @ARGV);
 $DoLLVM = 0 if (grep { /^-SkipLLVM$/i } @ARGV);
 $DoGcc  = 0 if (grep { /^-SkipGCC$/i  } @ARGV);
 $DoTest = 0 if (grep { /^-SkipTest$/i } @ARGV);
+$DoSpec = 0 if (grep { /^-SkipSpec$/i } @ARGV);
 
 $TagSuccess = 1 if (grep { /^-TagSuccess$/ } @ARGV);
 
@@ -69,11 +71,14 @@ sub ReportTime {
 }
 
 if ($DoPart1) {
+  push @Part1Time, "Part 1";
   push @Part1Time, time;
+  &Shell("./tools/llvm/utman.sh check-for-trusted", "");
   &Shell("./tools/llvm/utman.sh clean-install", "");
   &Shell("./tools/llvm/utman.sh clean-logs", "");
   &Shell("./tools/llvm/utman.sh binutils-arm", "");
   push @Part1Time, time;
+  &ReportTime(@Part1Time);
 }
 
 if ($DoLLVM) {
@@ -86,6 +91,9 @@ if ($DoLLVM) {
   &ReportTime(@LLVMTime);
   &TagRepo($LLVMRepo, $LLVMLog{rev}, "CompileSuccess", "y") if ($TagSuccess);
 }
+
+##$Gold1 = "./toolchain/pnacl_linux_x86_64/arm-none-linux-gnueabi/lib/LLVMgold.so";
+
 if ($DoGcc) {
   push @GccTime, "llvm-gcc compilation time"; 
   push @GccTime, time;
@@ -107,13 +115,14 @@ if ($DoGcc) {
 if ($DoTest) {
   push @TestCompileTime, "Test Compilation Time";
   push @TestCompileTime, time;
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 -j8", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  -j8", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1  -j8", "");
+  my ($J8) = '';
+  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 ${J8}", "");
+  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  ${J8}", "");
+  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1  ${J8}", "");
 
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1  -j8", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1  -j8", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1  -j8");
+  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
+  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
+  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}");
   push @TestCompileTime, time;
   &ReportTime(@TestCompileTime);
 
@@ -124,16 +133,33 @@ if ($DoTest) {
 
   push @TestRunTime, "Test Run Time";
   push @TestRunTime, time;
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1  -j8", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  -j8", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 -j8", "");
 
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1 -j8 smoke_tests", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1 -j8  smoke_tests", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1 -j8 smoke_tests", "");
-  &ReportTime(@TestRunTime);
+  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1  ${J8}", "");
+  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  ${J8}", "");
+  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 ${J8}", "");
+
+  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
+  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8}  smoke_tests", "");
+  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
   push @TestRunTime, time;
+  &ReportTime(@TestRunTime);
+}
 
+if ($DoSpec) {
+  push @SpecTim, "Spec2K run time";
+  push @TestRunTime, time;
+  my ($SETUP);
+  my ($SPEC_TESTS) = qw(176.gcc);
+  my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
+  chomp $OFFICIAL;
+  for $SETUP qw(SetupPnaclX8664Opt SetupPnaclArmOpt) {
+    &Shell("(cd tests/spec2k; ./run_all.sh CleanBenchmarks ${SPEC_TESTS})", "clean gcc spec2k");
+    &Shell("(cd tests/spec2k; ./run_all.sh PopulateFromSpecHarness ${OFFICIAL} ${SPEC_TESTS})", "clean gcc spec2k");
+    &Shell("(cd tests/spec2k; ./run_all.sh BuildAndRunBenchmarks  ${SETUP} ${SPEC_TESTS})", "clean gcc spec2k");
+  }
+}
+
+if ($DoTest && $DoSpec) {
   print "SUCCESS WITH REV $LLVMRev\n";
   print "Now saving the artifacts\n";
 

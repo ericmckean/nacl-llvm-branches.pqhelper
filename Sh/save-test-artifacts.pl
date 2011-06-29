@@ -22,9 +22,14 @@ if ($#ARGV >= 0) {
 }
 
 if (-d "scons-out") {
+  my @SaveDirs = grep { chomp }
+    Piped("find scons-out/ -type d -name tests", "");
+  push @SaveDirs, qw(toolchain/hg-build
+                     toolchain/hg-log
+                     toolchain/pnacl_linux_x86_64);
+
   &SaveTestArtifacts($Rev, $DstDir,
-                     grep { chomp }
-                     Piped("find scons-out/ -type d -name tests", ""));
+                     @SaveDirs);
 } else {
   die "There is no scons-out direcory. Run $PROGRAM_NAME from a native_client\n";
 }
