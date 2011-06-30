@@ -136,7 +136,7 @@ sub InitPatchQueueFromHgExport {
   my ($Parents) = &GetEdges($FirstRev, "parents");
   print "PARENTS:\n\t", join("\n\t", @{$Parents}), "\n";
 
-  Shell("hg qpop -a", "Reset the sequence from the start");
+  ##Shell("hg qpop -a", "Reset the sequence from the start");
 
   die "First Rev ${$FirstRev}{rev} has multiple parents\n" .
     "You need to specify the exact parent rev in order for this to work \n" .
@@ -152,14 +152,14 @@ sub InitPatchQueueFromHgExport {
     $FirstParent = $ParentRev{'rev'} # get the canonical rev for the Parent
   }
   chdir ($DstRepo);
-  my (@CurrSeries) = grep { chomp } Piped("hg qseries", "get existing qseries");
+  my (@CurrSeries) = grep { chomp } Piped("hg qseries", "get existing qseries for numbering");
   
   chdir $SrcRepo;
   my ($TmpDir); chomp ($TmpDir = &tempdir("/tmp/hgexport.XXXXX", CLEANUP => 0));
-  my ($i, $idx) = ($#CurrSeries+1, sprintf("%04d", $#CurrSeries+1));
+  my ($Base, $idx) = ($#CurrSeries+1, sprintf("%04d", $#CurrSeries+1));
   my ($RevLog) = $Path[0];
   my ($tweak) = '';
-
+  my ($i);
   if ($#{$Parents} == 1) {
     if ($FirstParent eq ${$Parents}[0]) {
       $tweak = '';
