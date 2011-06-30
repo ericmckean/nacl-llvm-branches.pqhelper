@@ -50,7 +50,7 @@ my ($CROSS_TARGET_X86_64)=qw(x86_64-none-linux-gnu);
 print "*********************************\n";
 print "This test is for REVISION $CurrRevTxt\n";
 my (@StartTime) = time;
-my (@Part1Time, @LLVMTime, @GccTime, @TestCompileTime, @TestRunTime);
+my (@Part1Time, @LLVMTime, @GccTime, @TestCompileTime, @TestRunTime, @SpecTime);
 my ($DoPart1, $DoLLVM, $DoGcc, $DoTest, $DoSpec, $TagSuccess) = (1, 1, 1, 1, 1, 0);
 
 $DoPart1 = 0 if (grep { /^-SkipPart1$/i } @ARGV);
@@ -113,41 +113,50 @@ if ($DoGcc) {
 }
 
 if ($DoTest) {
-  push @TestCompileTime, "Test Compilation Time";
-  push @TestCompileTime, time;
-  my ($J8) = '';
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 ${J8}", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  ${J8}", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1  ${J8}", "");
+  if (0) {
 
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}");
-  push @TestCompileTime, time;
-  &ReportTime(@TestCompileTime);
+    push @TestCompileTime, "Test Compilation Time";
+    push @TestCompileTime, time;
+    my ($J8) = '-j8';
+    &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 ${J8}", "");
+    &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 ${J8}", "");
+    &Shell("./scons platform=arm    MODE=nacl,opt-host bitcode=1 ${J8}", "");
 
-  &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestCompileSuccess", "y") if ($TagSuccess);
-  &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "TestCompileSuccess", "y") if ($TagSuccess);
-  print "**********************************************************************\n" .
-    "DONE WITH BUILD\n***********************************************************\n";
+    &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
+    &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
+    &Shell("./scons platform=arm    MODE=nacl,opt-host bitcode=1 nacl_pic=1  ${J8}", "");
+    push @TestCompileTime, time;
+    &ReportTime(@TestCompileTime);
 
-  push @TestRunTime, "Test Run Time";
-  push @TestRunTime, time;
+    &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestCompileSuccess", "y") if ($TagSuccess);
+    &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "TestCompileSuccess", "y") if ($TagSuccess);
+    print "**********************************************************************\n" .
+      "DONE WITH BUILD\n***********************************************************\n";
 
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1  ${J8}", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1  ${J8}", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 ${J8}", "");
+    push @TestRunTime, "Test Run Time";
+    push @TestRunTime, time;
 
-  &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
-  &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8}  smoke_tests", "");
-  &Shell("./scons platform=arm MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
-  push @TestRunTime, time;
-  &ReportTime(@TestRunTime);
+    &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 ${J8} smoke_tests", "");
+    &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 ${J8} smoke_tests", "");
+    &Shell("./scons platform=arm    MODE=nacl,opt-host bitcode=1 ${J8} smoke_tests", "");
+
+    &Shell("./scons platform=x86-64 MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
+    &Shell("./scons platform=x86-32 MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
+    &Shell("./scons platform=arm    MODE=nacl,opt-host bitcode=1 nacl_pic=1 ${J8} smoke_tests", "");
+    push @TestRunTime, time;
+    &ReportTime(@TestRunTime);
+  } else {
+    push @TestRunTime, "Test Run Time";
+    push @TestRunTime, time;
+    &Shell("./tools/llvm/utman-test.sh test-all", "");
+    push @TestRunTime, time;
+    &ReportTime(@TestRunTime);
+  }
 }
 
 if ($DoSpec) {
-  push @SpecTim, "Spec2K run time";
-  push @TestRunTime, time;
+  push @SpecTime, "Spec2K run time";
+  push @SpecTime, time;
   my ($SETUP);
   my ($SPEC_TESTS) = qw(176.gcc);
   my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
@@ -157,6 +166,8 @@ if ($DoSpec) {
     &Shell("(cd tests/spec2k; ./run_all.sh PopulateFromSpecHarness ${OFFICIAL} ${SPEC_TESTS})", "clean gcc spec2k");
     &Shell("(cd tests/spec2k; ./run_all.sh BuildAndRunBenchmarks  ${SETUP} ${SPEC_TESTS})", "clean gcc spec2k");
   }
+  push @SpecTime, time;
+  &ReportTime(@SpecTime);
 }
 
 if ($DoTest && $DoSpec) {

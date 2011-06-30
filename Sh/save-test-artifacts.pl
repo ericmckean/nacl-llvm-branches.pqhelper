@@ -12,7 +12,7 @@ print "$EXECUTABLE_NAME $PROGRAM_NAME ", Cwd::abs_path($PROGRAM_NAME), "\n";
 import RepoHelper;
 
 my $Rev = "Orig";
-my $DstDir = "~/Work/Bugs/Merge";
+my $DstDir = "$ENV{HOME}/Work/Bugs/Merge";
 
 if ($#ARGV >= 0) {
   $Rev = shift @ARGV;

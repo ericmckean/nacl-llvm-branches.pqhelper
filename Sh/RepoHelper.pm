@@ -45,7 +45,7 @@ sub TagRepo {
   my ($Orig); chomp($Orig = `pwd`);
   chomp($RepoRoot = `pwd`) if ($RepoRoot eq '');
   chdir $RepoRoot;
-  print "Tag the repo with $Tag ? ";
+  print "Tag the repo $RepoRoot with $Tag ? ";
   $ans = <STDIN> if ($ans eq '');
   if ($ans =~ /y(e(s)?)?/i) {
     Shell("hg qpop -a");
@@ -211,6 +211,7 @@ sub Merge3Post {
   print "If you are done with this patch, don't forget to the following\n";
   print "  hg qrefresh\n";
   print "  $::PROGRAM_NAME -CommitRefresh\n";
+  print "Continue to next? "; $x = <STDIN>;
 }
 
 # Routine takes an array of of specific patches against $Target
@@ -886,32 +887,43 @@ sub GetRevName {
 
 sub SaveTestArtifacts() {
   my($VersionTag, $DstDir, @Dirs) = (@_);
-  my($Dir);
+  my($Dir, $Interactive);
   my(@AllArtifacts);
-  foreach $Dir (@Dirs) {
-    my (@MD5Sums) = Piped("find $Dir -type f | xargs md5sum", "");
-    push @AllArtifacts, @MD5Sums;
-  }
-  @AllArtifacts = sort @AllArtifacts;
   my ($Artifact, $PriorMD5Sum, $PriorArtifact) = ('', '');
-  Shell("rm -rf $DstDir/$VersionTag", "");
-  Shell("mkdir -p $DstDir/$VersionTag", "");
-  $DstDir = "$DstDir/$VersionTag";
 
-  foreach  (@AllArtifacts) {
-    chomp;
-    /^([a-z0-9]+)\s+(\S.*)$/;
-    my ($MD5Sum, $Artifact) = ($1, $2);
-    my($A, $P) = &fileparse($Artifact);
-    Shell("mkdir -p ${DstDir}/${P}", "");
-    if ($MD5Sum eq $PriorMD5Sum) {
-      print "  REPEAT $Artifact\n";
-      Shell("ln -s -f ${DstDir}/${PriorArtifact} ${DstDir}/${Artifact}", "");
-    } else {
-      $PriorMD5Sum = $MD5Sum;
-      $PriorArtifact = $Artifact;
-      print "$MD5Sum // $Artifact\n";
-      Shell("cp -a ${Artifact} ${DstDir}/${Artifact}", "");
+  print "$DstDir/$VersionTag\n";
+  if (-d "$DstDir/$VersionTag") {
+    print "Moving Old Test Results\n";
+    my (@Old) = Piped("ls -1d ${DstDir}/${VersionTag}*");
+    Shell("mv ${DstDir}/${VersionTag} ${DstDir}/${VersionTag}.old${\($#Old+1)}", "");
+  }
+  if (1) {
+    print "About to save artifacts: ${DstDir}/${VersionTag} "; 
+    if ($Interactive) {
+      print "Continue? "; $Dir=<STDIN>;
+    }
+    foreach $Dir (@Dirs) {
+      my (@MD5Sums) = Piped("find $Dir -type f | xargs md5sum", "");
+      push @AllArtifacts, @MD5Sums;
+    }
+    @AllArtifacts = sort @AllArtifacts;
+    Shell("mkdir -p $DstDir/$VersionTag", "");
+    $DstDir = "$DstDir/$VersionTag";
+
+    foreach (@AllArtifacts) {
+      chomp;
+      /^([a-z0-9]+)\s+(\S.*)$/;
+      my ($MD5Sum, $Artifact) = ($1, $2);
+      my($A, $P) = &fileparse($Artifact);
+      Shell("mkdir -p ${DstDir}/${P}", "")
+        if (! -d "${DstDir}/${P}");
+      if ($MD5Sum eq $PriorMD5Sum) {
+        Shell("ln -s -f ${DstDir}/${PriorArtifact} ${DstDir}/${Artifact}", "REPEAT $Artifact");
+      } else {
+        $PriorMD5Sum = $MD5Sum;
+        $PriorArtifact = $Artifact;
+        Shell("cp -a ${Artifact} ${DstDir}/${Artifact}", "$MD5Sum");
+      }
     }
   }
 }
