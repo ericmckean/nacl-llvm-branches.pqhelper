@@ -407,8 +407,12 @@ sub GetPatchedFiles {
 }
 
 
-chomp($_ = `pwd`);
-
+  my ($RevMod) = &SetRevNameMod($ENV{PQ_REV_NAME_MOD});
+  if (&ArgvHasUniqueOpt('-NameMod', \$RevMod)) {
+    &SetRevNameMod($RevMod);
+  }
+  chomp($_ = `pwd`);
+  
   if (grep { /^-Clean$/ } @ARGV) {
     &HgRevertClean($_);
     &HgRevertClean("$_/.hg/patches");
@@ -427,7 +431,7 @@ chomp($_ = `pwd`);
     
     my ($PatchOptions, $PatchDir, $RepoDir, $BaseRev, $Where);
     my ($Cmd,$R1);
-
+    my ($Where) = '-FromNow';
     &ArgvHasUniqueOpt('-PatchDir', \$PatchDir) ||
       die "Requires -PatchDir=DIR\n";
 
@@ -454,7 +458,7 @@ chomp($_ = `pwd`);
       if ($Cmd ne 'hg');
 
     ## &InitPatchQueue("-p2 -s", \@PatchList,  $_, "svnrev(124151)",);
-    &InitPatchQueue($PatchOptions, \@PatchList, $RepoDir, $BaseRev);
+    &InitPatchQueue($PatchOptions, \@PatchList, $RepoDir, $BaseRev, $Where);
     
   } elsif (grep { /^-InitFromHgExport$/ } @ARGV) {
     my ($SrcRepo, $PatchOptions, $BaseRev, $EndRev, $DstRepo, 
@@ -657,6 +661,8 @@ chomp($_ = `pwd`);
     }
   } else {
     print "-Clean (Clean and Revert) or -I (Init) or -T (track) or -Refresh\n";
+    print "-NameMod=ENV{PQ_REV_NAME_MOD} (def:null) set an alternate rev name for branches and such\n";
+    print "  -NameMod is currently set to '${\(&GetRevNameMod())}'\n";
     print "-InitFromHgExport\n" .
       "  Requires the following Arguments\n" . 
       "   -SrcRepo=DIR - directory of the repo to pull from (defaults to cwd)\n" .

@@ -23,7 +23,7 @@ BEGIN {
   @ISA         = qw(Exporter);
   @EXPORT      = qw(&GetRepoRoot &QuoteIt &Shell &Piped &GetHgLog 
                     &SaveTestArtifacts &WriteLog 
-                    &MergePatchHeader &GetRevName
+                    &MergePatchHeader &GetRevName &SetRevNameMod &GetRevNameMod
                     &TagRepo 
                     &Merge3 &MergeOneFile &MergeOneFileAlt
                     &HgPushLoop &HgGetUnknownFiles
@@ -40,6 +40,8 @@ BEGIN {
 our @EXPORT_OK;
 END { }       # module clean-up code here (global destructor)
 
+my ($RevNameMod) = '';
+
 sub TagRepo {
   my ($RepoRoot, $BaseRev, $Tag, $ans) = @_;
   my ($Orig); chomp($Orig = `pwd`);
@@ -51,7 +53,7 @@ sub TagRepo {
     Shell("hg qpop -a");
     my (%Log) = &GetHgLog($BaseRev);
     my ($RevName) = &GetRevName(%Log);
-    Shell("hg tag -l -r $Log{rev} ${RevName}${Tag}");
+    Shell("hg tag -f -l -r $Log{rev} ${RevName}${Tag}");
   }
   chdir $Orig;
 }
@@ -658,12 +660,12 @@ sub HgCommitMqRefresh {
   #&HgPushLoop(@MqSeries);
   my ($RevName) = &GetRevName(%RevLog);
   my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a");
-  if (grep { /^${RevName}\s/x } @AllBranches) {
-    print "Branch $RevName already exists\n";
-  } else {
-    print "Creating new branch $RevName\n";
-    Shell("hg -R .hg/patches branch $RevName", "");
+  my (@MatchingBranches) = grep { /^${RevName}/x } @AllBranches;
+  if ($#MatchingBranches >= 0) {
+    print "Branch $RevName already exists. Please rename\n";
   }
+  print "Creating/forcing new branch $RevName\n";
+  Shell("hg -R .hg/patches branch -f $RevName", "");
   Shell("hg commit -R .hg/patches", "COMMIT THE BRANCH");
 };
 
@@ -866,6 +868,7 @@ $Key, ${$Rtn}{$Key}
   foreach $Key (qw(rev children parents svn tags branches)) {
     write;
   }
+  print "RevName      ${\(&GetRevName(%{$Rtn}))}\n";
 }
 
 sub GetRevName {
@@ -874,15 +877,27 @@ sub GetRevName {
   my (@tmp);
 
   if ($Log{svn} ne '') {
-    $Rtn = "svn${Log{svn}}";
+    $Rtn = "svn${Log{svn}}${RevNameMod}";
   } elsif (@tmp = split($Log{tags})) {
-    $Rtn = "tag$tmp[0]";
+    $Rtn = "tag$tmp[0]${RevNameMod}";
   } else {
     # worst case - use the short id
     @tmp = split(/:/, $Log{rev});
-    $Rtn = "rev$tmp[0]";
+    $Rtn = "rev$tmp[0]${RevNameMod}";
   }
   return $Rtn;
+}
+
+sub SetRevNameMod {
+  ($RevNameMod) = (@_);
+  $RevNameMod = $::ENV{PQ_REV_NAME_MOD}   if ($RevNameMod eq '');
+  ##if ($ENV{PQ_REV_NAME_MOD} eq '')
+  print "setting the PQ_REV_NAME_MOD to $RevNameMod\n";
+  $RevNameMod;
+}
+
+sub GetRevNameMod {
+  return $RevNameMod;
 }
 
 sub SaveTestArtifacts() {
