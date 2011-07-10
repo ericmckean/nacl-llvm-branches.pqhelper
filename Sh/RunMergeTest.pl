@@ -161,7 +161,7 @@ if ($DoSpec) {
   my ($SPEC_TESTS) = qw(176.gcc);
   my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
   chomp $OFFICIAL;
-  for $SETUP qw(SetupPnaclX8664Opt SetupPnaclArmOpt) {
+  for $SETUP qw(SetupPnaclArmOpt) { #SetupPnaclX8664Opt 
     &Shell("(cd tests/spec2k; ./run_all.sh CleanBenchmarks ${SPEC_TESTS})", "clean gcc spec2k");
     &Shell("(cd tests/spec2k; ./run_all.sh PopulateFromSpecHarness ${OFFICIAL} ${SPEC_TESTS})", "clean gcc spec2k");
     &Shell("(cd tests/spec2k; ./run_all.sh BuildAndRunBenchmarks  ${SETUP} ${SPEC_TESTS})", "clean gcc spec2k");
