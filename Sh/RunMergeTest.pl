@@ -22,6 +22,8 @@ foreach (@dirs) {
 my $NaCl = `pwd`; chomp $NaCl;
 my ($LLVMRepo, $LLVMGccRepo);
 
+&SetRevNameMod('');
+
 chdir "hg/llvm/llvm-trunk";
 chomp($LLVMRepo = `pwd`);
 Shell("hg qpop -a", "find base SVN rev");
@@ -175,7 +177,7 @@ if ($DoTest && $DoSpec) {
   print "Now saving the artifacts\n";
 
 
-  &Shell("./save-test-artifacts.pl $CurrRevTxt");
+  &Shell("save-test-artifacts.pl $CurrRevTxt");
 
 
   &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestAllPassed");
