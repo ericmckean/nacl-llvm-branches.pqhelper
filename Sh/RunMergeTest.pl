@@ -39,6 +39,11 @@ my (%LLVMGccLog) = &GetHgLog('');
 Shell("hg qpush -a", "Push current set of patches");
 my($LLVMGccRev) = &GetRevName(%LLVMGccLog);
 
+my (%TestArray) = 
+  map { $_ => 1 } qw(x8664 x8664pic x8632 x8632pic arm armpic);
+print join(" ", keys %TestArray), "\n";
+my $RUN_ALL_TESTS = keys %TestArray;
+
 
 chdir $NaCl;
 my @x = grep {chomp} Piped("svnversion .", "");
@@ -60,6 +65,21 @@ $DoLLVM = 0 if (grep { /^-SkipLLVM$/i } @ARGV);
 $DoGcc  = 0 if (grep { /^-SkipGCC$/i  } @ARGV);
 $DoTest = 0 if (grep { /^-SkipTest$/i } @ARGV);
 $DoSpec = 0 if (grep { /^-SkipSpec$/i } @ARGV);
+my (@SkippedTests);
+
+push @SkippedTests, grep { /^x86/ } keys %TestArray if (grep { /^-SkipX86$/i } @ARGV);
+push @SkippedTests, grep { /^x8664/ } keys %TestArray if (grep { /^-SkipX8664$/i } @ARGV);
+push @SkippedTests, grep { /^x8632/ } keys %TestArray if (grep { /^-SkipX8632$/i } @ARGV);
+push @SkippedTests, grep { /^arm/ } keys %TestArray if (grep { /^-SkipARM$/i } @ARGV);
+push @SkippedTests, grep { /pic$/ } keys %TestArray if (grep { /^-SkipPIC$/i } @ARGV);
+if ($#SkippedTests >= 0) {
+  @DeletedTests = delete @TestArray{@SkippedTests};
+  print "Skipping the following tests: ", join(" ", @SkippedTests), "\n";
+  print "Running the following tests: ", join(" ", keys(%TestArray)), "\n";
+} else {
+  my $x = keys(%TestArray);
+  print "Running all tests : $RUN_ALL_TESTS out of $x\n";
+}
 
 $TagSuccess = 1 if (grep { /^-TagSuccess$/ } @ARGV);
 
@@ -150,26 +170,43 @@ if ($DoTest) {
   } else {
     push @TestRunTime, "Test Run Time";
     push @TestRunTime, time;
-    &Shell("./tools/llvm/utman-test.sh test-all", "");
+    my $x = keys %TestArray;
+    if ($x == $RUN_ALL_TESTS) {
+      &Shell("./tools/llvm/utman-test.sh test-all", "");
+    } else {
+      &Shell("./tools/llvm/utman-test.sh test-x86-64", "") if (exists $TestArray{x8664});      
+      &Shell("./tools/llvm/utman-test.sh test-x86-64-pic", "") if (exists  $TestArray{x8664pic});
+      &Shell("./tools/llvm/utman-test.sh test-x86-32", "") if (exists  $TestArray{x8632});
+      &Shell("./tools/llvm/utman-test.sh test-x86-32-pic", "") if (exists  $TestArray{x8632pic});      
+      &Shell("./tools/llvm/utman-test.sh test-arm", "")   if (exists  $TestArray{arm});
+      &Shell("./tools/llvm/utman-test.sh test-arm-pic", "") if (exists  $TestArray{armpic});
+    }
     push @TestRunTime, time;
     &ReportTime(@TestRunTime);
   }
 }
 
-if ($DoSpec) {
+{
   push @SpecTime, "Spec2K run time";
   push @SpecTime, time;
   my ($SETUP);
   my ($SPEC_TESTS) = qw(176.gcc);
   my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
   chomp $OFFICIAL;
-  for $SETUP qw(SetupPnaclArmOpt) { #SetupPnaclX8664Opt 
-    &Shell("(cd tests/spec2k; ./run_all.sh CleanBenchmarks ${SPEC_TESTS})", "clean gcc spec2k");
-    &Shell("(cd tests/spec2k; ./run_all.sh PopulateFromSpecHarness ${OFFICIAL} ${SPEC_TESTS})", "clean gcc spec2k");
-    &Shell("(cd tests/spec2k; ./run_all.sh BuildAndRunBenchmarks  ${SETUP} ${SPEC_TESTS})", "clean gcc spec2k");
+  my @SpecSetUps = qw (SetupPnaclX8664Opt SetupPnaclArmOpt);
+  @SpecSetUps = grep { ! /x86/i } @SpecSetUps if (grep { /^-SkipX86/i } @ARGV );
+  @SpecSetUps = grep { ! /arm/i } @SpecSetUps if (grep { /^-Skiparm/i } @ARGV );
+  print "Running the following SPEC setups ", join(" ", @SpecSetUps), "\n";
+
+  if ($DoSpec) { 
+    for $SETUP qw(@SpecSetUps) { 
+      &Shell("(cd tests/spec2k; ./run_all.sh CleanBenchmarks ${SPEC_TESTS})", "clean gcc spec2k");
+      &Shell("(cd tests/spec2k; ./run_all.sh PopulateFromSpecHarness ${OFFICIAL} ${SPEC_TESTS})", "clean gcc spec2k");
+      &Shell("(cd tests/spec2k; ./run_all.sh BuildAndRunBenchmarks  ${SETUP} ${SPEC_TESTS})", "clean gcc spec2k");
+    }
+    push @SpecTime, time;
+    &ReportTime(@SpecTime);
   }
-  push @SpecTime, time;
-  &ReportTime(@SpecTime);
 }
 
 if ($DoTest && $DoSpec) {
