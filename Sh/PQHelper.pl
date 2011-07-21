@@ -90,6 +90,57 @@ sub Foo {
 
 }
 
+sub FindUnimportedRevs {
+  my ($SrcRepoDir, $DstRepoDir,  $EndRev) = @_;
+  my ($SrcRepo, $DstRepo);
+  ($Cmd, $SrcRepo) = &GetRepoRoot($SrcRepoDir);
+  ($Cmd, $DstRepo) = &GetRepoRoot($DstRepoDir);
+
+  chdir $DstRepo;
+  
+  my (@MqSeries) = grep { chomp } Piped("hg qseries", "get the full series");
+  my (@OrigHashes) = &ExtractHashesFrom("$DstRepo/.hg/patches", @MqSeries);
+  die "No valid source hashes in patch series\n" if ($#OrigHashes == -1);
+  print join("\nHashes:", @OrigHashes);
+  my ($BaseRev) = $OrigHashes[$#OrigHashes];
+  if ($EndRev eq $BaseRev) {
+    print "No more revs to pull\n";
+    return ();
+  }
+  print "Using $BaseRev and $EndRev\n";
+  my @Path = &FindEditPath($SrcRepo, $BaseRev, $EndRev);
+
+  foreach my $Rev (@Path) {
+    &WriteLog($Rev);
+  }
+  print "No commits to pull at this time\n" if ($#Path == -1);
+  return @Path;
+}
+
+
+sub ExtractHashesFrom {
+  my($RepoDir, @Patches) = @_;
+  my (@Rtn);
+  my ($Orig); chomp ($Orig=`pwd`);
+  chdir $RepoDir;
+  for my $Patch (@Patches) {
+    my ($Hash1, $Hash2);
+    if ($Patch =~ /-([a-f0-9]+).patch$/i) {
+      $Hash1 = $1;
+      print "Found Hash1 $Hash1 in $Patch\n";
+    }
+    @NodeId = grep { /# Node ID [a-f0-9]+\s*$/i } 
+    Piped("cat $Patch", "grab node id");
+    # print "found $#NodeId  index=", index(lc $NodeId[0], $Hash1), "\n";
+    if (index(lc $NodeId[0], $Hash1) == 10) {
+      # print "Pushing $Hash1\n";
+      push @Rtn, $Hash1;
+    }
+  }
+  chdir $Orig;
+  return @Rtn;
+}
+
 
 sub InitPatchQueueFromHgExport {
 
@@ -411,22 +462,26 @@ sub GetPatchedFiles {
   if (&ArgvHasUniqueOpt('-NameMod', \$RevMod)) {
     &SetRevNameMod($RevMod);
   }
+
   chomp($_ = `pwd`);
-  
-  if (grep { /^-Clean$/ } @ARGV) {
+  if (grep { /^-FindMissingRevs$/ } @ARGV) {
+    my ($SrcRepo, $DstRepo, $EndRev);
+    chomp($SrcDir=`pwd`);
+
+    &ArgvHasUniqueOpt('-SrcRepo', \$SrcRepo) ||
+      die "Requires -SrcRepo=DIR\n";
+    &ArgvHasUniqueOpt('-DstRepo', \$DstRepo) ||
+      die "Requires -DstRepo=DIR\n";
+    &ArgvHasUniqueOpt('-EndRev', \$EndRev) || 
+      die "Requires -EndRev=REV\n";
+
+    &FindUnimportedRevs($SrcRepo, $DstRepo, $EndRev);
+    #print join("\n", ), "\n";
+    # print 
+  } elsif (grep { /^-Clean$/ } @ARGV) {
     &HgRevertClean($_);
     &HgRevertClean("$_/.hg/patches");
 
-  } elsif (grep { /^-Foo$/ } @ARGV) {
-    my ($SrcDir, $DstDir);
-    chomp($SrcDir=`pwd`);
-    &GetPatchedFiles($SrcDir);
-#     &ArgvHasUniqueOpt('-SrcDir', \$SrcDir) ||
-#       die "Requires -SrcDir=DIR\n";
-#     &ArgvHasUniqueOpt('-DstDir', \$DstDir) ||
-#       die "Requires -DstDir=DIR\n";
-#     &Foo($SrcDir, $DstDir);
-    
   } elsif (grep { /^-Init$/ } @ARGV) {
     
     my ($PatchOptions, $PatchDir, $RepoDir, $BaseRev, $Where);
