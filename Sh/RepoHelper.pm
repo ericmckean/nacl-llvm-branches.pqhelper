@@ -868,7 +868,7 @@ $Key, ${$Rtn}{$Key}
   foreach $Key (qw(rev children parents svn tags branches)) {
     write;
   }
-  print "RevName      ${\(&GetRevName(%{$Rtn}))}\n";
+  print "RevName      " .&GetRevName(%{$Rtn}) . "\n";
 }
 
 sub GetRevName {
@@ -876,15 +876,21 @@ sub GetRevName {
   my ($Rtn) = '';
   my (@tmp);
 
-  if ($Log{svn} ne '') {
+  #print "Log == ", join(" ", keys(%Log)), " -- ", join (" ", values(%Log)), "\n";
+  #print '++', $Log{branches}, "\n";
+  if (exists $Log{svn}) {
     $Rtn = "svn${Log{svn}}${RevNameMod}";
-  } elsif (@tmp = split($Log{tags})) {
+  } elsif ((exists $Log{branches}) && (@tmp = split /\s+/, $Log{branches})) {
+    $Rtn = $tmp[0];
+    #$print "Foo", join(" ", @tmp), "\n";
+  } elsif ((exists $Log{tags}) && (@tmp = split /\s+/, $Log{tags})) {
     $Rtn = "tag$tmp[0]${RevNameMod}";
   } else {
     # worst case - use the short id
     @tmp = split(/:/, $Log{rev});
     $Rtn = "rev$tmp[0]${RevNameMod}";
   }
+  # print "returning $Rtn\n";
   return $Rtn;
 }
 

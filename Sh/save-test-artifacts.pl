@@ -24,9 +24,9 @@ if ($#ARGV >= 0) {
 if (-d "scons-out") {
   my @SaveDirs = grep { chomp }
     Piped("find scons-out/ -type d -name tests", "");
-  push @SaveDirs, qw(toolchain/hg-build
+  push @SaveDirs, qw(toolchain/hg-build-newlib
                      toolchain/hg-log
-                     toolchain/pnacl_linux_x86_64);
+                     toolchain/pnacl_linux_x86_64_newlib);
 
   &SaveTestArtifacts($Rev, $DstDir,
                      @SaveDirs);

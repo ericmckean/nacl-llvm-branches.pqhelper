@@ -22,7 +22,11 @@ foreach (@dirs) {
 my $NaCl = `pwd`; chomp $NaCl;
 my ($LLVMRepo, $LLVMGccRepo);
 
-&SetRevNameMod('');
+
+$ENV{PQ_REV_NAME_MOD} = Piped("git log | grep git-svn | head -1 | cut -d@ -f2 | sed -e 'print \$1'")   
+  if (! exists $ENV{PQ_REV_NAME_MOD});
+&SetRevNameMod($ENV{PQ_REV_NAME_MOD});
+print "PQ_REV_NAME_MOD is $ENV{PQ_REV_NAME_MOD}\n";
 
 chdir "hg/llvm/llvm-trunk";
 chomp($LLVMRepo = `pwd`);
@@ -30,6 +34,8 @@ Shell("hg qpop -a", "find base SVN rev");
 my (%LLVMLog) = &GetHgLog('');
 Shell("hg qpush -a", "Push current set of patchs");
 my($LLVMRev) = &GetRevName(%LLVMLog);
+chdir ".hg/patches";
+my(%LLVMMQRevLog) = &GetHgLog('');
 
 chdir $NaCl;
 chdir "hg/llvm-gcc/llvm-gcc-4.2";
@@ -38,6 +44,8 @@ Shell("hg qpop -a", "find base SVN rev for llvm-gcc");
 my (%LLVMGccLog) = &GetHgLog('');
 Shell("hg qpush -a", "Push current set of patches");
 my($LLVMGccRev) = &GetRevName(%LLVMGccLog);
+chdir ".hg/patches";
+my(%LLVMGccMQRevLog) = &GetHgLog('');
 
 my (%TestArray) = 
   map { $_ => 1 } qw(x8664 x8664pic x8632 x8632pic arm armpic);
@@ -46,9 +54,7 @@ my $RUN_ALL_TESTS = keys %TestArray;
 
 
 chdir $NaCl;
-my @x = grep {chomp} Piped("svnversion .", "");
-my $SVNVersion = $x[0];
-my $CurrRevTxt= "nacl-$SVNVersion-$LLVMRev-$LLVMGccRev";
+my $CurrRevTxt= "$ENV{PQ_REV_NAME_MOD}-$LLVMRev-$LLVMGccRev";
 
 print "*********************************\n";
 print "This test is for REVISION $CurrRevTxt\n";
@@ -110,9 +116,18 @@ if ($Compile) {
   } else {
     $ENV{UTMAN_RESET_MQ}="false";
   }
-  $ENV{PQ_REV_NAME_MOD}=Piped("git log | grep git-svn | head -1 | cut -d@ -f2 | sed -e 'print \$1'");
-  #$ENV{LLVM_QPARENT_REV}="svnrev(128002)";
-  #$ENV{LLVM_GCC_QPARENT_REV}="svnrev(126872)";
+  $ENV{LLVM_QPARENT_REV} =     $LLVMLog{rev};
+  $ENV{LLVM_GCC_QPARENT_REV} = $LLVMGccLog{rev};
+  $ENV{LLVM_MQ_REV} =          $LLVMMQRevLog{rev};
+  $ENV{LLVM_GCC_MQ_REV} =      $LLVMMGccQRevLog{rev};
+
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+  print "LLVM_QPARENT_REV    =$ENV{LLVM_QPARENT_REV} ${\(&GetRevName(%LLVMLog))}\n";
+  print "LLVM_GCC_QPARENT_REV=$ENV{LLVM_GCC_QPARENT_REV} ${\(&GetRevName(%LLVMGccLog))}\n";
+  print "LLVM_MQ_REV         =$ENV{LLVM_MQ_REV} ${\(&GetRevName(%LLVMMQRevLog))}\n";
+  print "LLVM_GCC_MQ_REV     =$ENV{LLVM_GCC_MQ_REV} ${\(&GetRevName(%LLVMMGccQRevLog))}\n";
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
+
   &Shell("./tools/llvm/utman.sh show-config", "");
   &Shell("./tools/llvm/utman.sh everything-translator", "do it all");
   push @CompileTime, time;
@@ -138,6 +153,7 @@ if ($DoTest) {
     &Shell("./tools/llvm/utman-test.sh test-x86-32-pic", "") if (exists  $TestArray{x8632pic});      
     &Shell("./tools/llvm/utman-test.sh test-arm", "")   if (exists  $TestArray{arm});
     &Shell("./tools/llvm/utman-test.sh test-arm-pic", "") if (exists  $TestArray{armpic});
+
   }
   push @TestRunTime, time;
   &ReportTime(@TestRunTime);
@@ -147,16 +163,16 @@ if ($DoTest) {
   push @SpecTime, "Spec2K run time";
   push @SpecTime, time;
   my ($SETUP);
-  my ($SPEC_TESTS) = qw(176.gcc 254.gap);
+  my ($SPEC_TESTS) = "176.gcc 254.gap"; # 
   my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
   chomp $OFFICIAL;
   my @SpecSetUps = qw (SetupPnaclX8664Opt SetupPnaclArmOpt);
-  @SpecSetUps = grep { ! /x86/i } @SpecSetUps if (grep { /^-SkipX86/i } @ARGV );
-  @SpecSetUps = grep { ! /arm/i } @SpecSetUps if (grep { /^-Skiparm/i } @ARGV );
+  @SpecSetUps = grep {!/x86/i} @SpecSetUps if (grep { /^-SkipX86/i } @ARGV );
+  @SpecSetUps = grep {!/arm/i} @SpecSetUps if (grep { /^-Skiparm/i } @ARGV );
   print "Running the following SPEC setups ", join(" ", @SpecSetUps), "\n";
 
   if ($DoSpec) { 
-    for $SETUP qw(@SpecSetUps) { 
+    for $SETUP (@SpecSetUps) { 
       &Shell("(cd tests/spec2k; ./run_all.sh CleanBenchmarks ${SPEC_TESTS})", "clean gcc spec2k");
       &Shell("(cd tests/spec2k; ./run_all.sh PopulateFromSpecHarness ${OFFICIAL} ${SPEC_TESTS})", "clean specs");
       &Shell("(cd tests/spec2k; ./run_all.sh BuildAndRunBenchmarks  ${SETUP} ${SPEC_TESTS})", "run specs");
