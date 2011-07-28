@@ -48,7 +48,7 @@ chdir ".hg/patches";
 my(%LLVMGccMQRevLog) = &GetHgLog('');
 
 my (%TestArray) = 
-  map { $_ => 1 } qw(x8664 x8664pic x8632 x8632pic arm armpic);
+  map { $_ => 1 } qw(x8664 x8664pic x8632 x8632pic arm armpic sbtc);
 print join(" ", keys %TestArray), "\n";
 my $RUN_ALL_TESTS = keys %TestArray;
 
@@ -73,6 +73,26 @@ $Clean = 1 if  (grep { /^-Clean$/i } @ARGV);
 $Compile = 0 if (grep { /^-SkipCompile$/i  } @ARGV);
 $DoTest = 0 if (grep { /^-SkipTest$/i } @ARGV);
 $DoSpec = 0 if (grep { /^-SkipSpec$/i } @ARGV);
+
+if (grep { /^-FirstRun$/i } @ARGV) {
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+  print "FirstRun=1  Clean=1 Compile=1 Download=1\n";
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+  $Clean = 1;
+  $Compile = 1;
+  $Download = 1;
+}
+
+if (grep { /^-SecondRun$/i } @ARGV) {
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+  print "SecondRun=1 Clean=0 Compile=0 Download=0\n";
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+
+  $Clean = 0;
+  $Compile = 0;
+  $Download = 0;
+}
+
 $Download = 0 if (grep { /^-SkipDownload$/i } @ARGV);
 my (@SkippedTests);
 
@@ -81,6 +101,7 @@ push @SkippedTests, grep { /^x8664/ } keys %TestArray if (grep { /^-SkipX8664$/i
 push @SkippedTests, grep { /^x8632/ } keys %TestArray if (grep { /^-SkipX8632$/i } @ARGV);
 push @SkippedTests, grep { /^arm/ } keys %TestArray if (grep { /^-SkipARM$/i } @ARGV);
 push @SkippedTests, grep { /pic$/ } keys %TestArray if (grep { /^-SkipPIC$/i } @ARGV);
+push @SkippedTests, grep { /sbtc$/ } keys %TestArray if (grep { /^-SkipSBTC$/i } @ARGV);
 
 if ($#SkippedTests >= 0) {
   @DeletedTests = delete @TestArray{@SkippedTests};
@@ -154,6 +175,11 @@ if ($DoTest) {
     &Shell("./tools/llvm/utman-test.sh test-arm", "")   if (exists  $TestArray{arm});
     &Shell("./tools/llvm/utman-test.sh test-arm-pic", "") if (exists  $TestArray{armpic});
 
+    &Shell("./tools/llvm/utman-test.sh test-x86-64-sbtc", "") 
+      if ((exists $TestArray{x8664}) && (exists $TestArray{sbtc}))
+	  ;
+    &Shell("./tools/llvm/utman-test.sh test-x86-32-sbtc", "") 
+      if ((exists  $TestArray{x8632}) && (exists $TestArray{sbtc}));
   }
   push @TestRunTime, time;
   &ReportTime(@TestRunTime);
@@ -167,7 +193,7 @@ if ($DoTest) {
   my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
   chomp $OFFICIAL;
   my @SpecSetUps = qw (SetupPnaclX8664Opt SetupPnaclArmOpt);
-  @SpecSetUps = grep {!/x86/i} @SpecSetUps if (grep { /^-SkipX86/i } @ARGV );
+  @SpecSetUps = grep {!/x86/i} @SpecSetUps if (grep { /^-SkipX8664/i } @ARGV );
   @SpecSetUps = grep {!/arm/i} @SpecSetUps if (grep { /^-Skiparm/i } @ARGV );
   print "Running the following SPEC setups ", join(" ", @SpecSetUps), "\n";
 
@@ -184,14 +210,12 @@ if ($DoTest) {
 
 if ($DoTest && $DoSpec) {
   print "SUCCESS WITH REV $LLVMRev\n";
-  print "Now saving the artifacts\n";
-
-
-  &Shell("save-test-artifacts.pl $CurrRevTxt");
-
-
-  &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestAllPassed");
-  &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "TestAllPassed");
+  if ($SaveArtifacts) {
+    print "Now saving the artifacts\n";
+    &Shell("save-test-artifacts.pl $CurrRevTxt");
+    &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestAllPassed");
+    &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "TestAllPassed");
+  }
 }
 
 exit(0);
