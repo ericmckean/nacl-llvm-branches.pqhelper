@@ -101,6 +101,8 @@ sub MergeOneFile {
   die "File ${RepoDir}/${Target}  does not correspond to an existing file in the repo\n"
     if (! -e "${RepoDir}/${Target}");
 
+  die "Please define env var MERGE3TOOL\n" if (! exists $ENV{MERGE3TOOL});
+
   my @MqStatus = grep { chomp } Piped("hg -R .hg/patches stat -n", "get mqrepo status");
 
   Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
@@ -132,7 +134,7 @@ sub MergeOneFile {
     close $Fh;
     &ApplyPatch("${TmpDir}/${Target}.${BaseRevName}.patch", $Target, $TmpDir, "-p1");
   }
-  Shell("kdiff3 ${TmpDir}/${Target} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
+  Shell("$ENV{MERGE3TOOL} ${TmpDir}/${Target} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
         "run the merge3");
   &Merge3Post($Target);
   chdir $Orig;
@@ -154,6 +156,8 @@ sub MergeOneFileAlt {
 
   die "File ${RepoDir}/${Target}  does not correspond to an existing file in the repo\n"
     if (! -e "${RepoDir}/${Target}");
+
+  die "Please define env var MERGE3TOOL\n" if (! exists $ENV{MERGE3TOOL});
 
   Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
   Shell("hg cat -r ${$BaseRevLog}{rev} ${Target} -o ${TmpDir}/${Target}.${BaseRevName}",
@@ -191,7 +195,7 @@ sub MergeOneFileAlt {
             "No patch, so copy instead (pass $i)");
     }
   }
-  Shell("kdiff3 ${TmpDir}/${Target}.${BaseRevName}.0 ${TmpDir}/${Target}.${BaseRevName}.1 ${Target}",
+  Shell("$ENV{MERGE3TOOL} ${TmpDir}/${Target}.${BaseRevName}.0 ${TmpDir}/${Target}.${BaseRevName}.1 ${Target}",
         "run the merge3");
   &Merge3Post($Target);
   chdir $Orig;
@@ -200,7 +204,7 @@ sub MergeOneFileAlt {
 sub Merge3Post {
   my ($Target) = @_;
   my ($x);
-  print "kdiff3 finished. Here is the repo status\n";
+  print "Three way merge finished. Here is the repo status\n";
   Shell("hg stat", "see the mods");
 
   print "Continue to see the mq status? "; $x = <STDIN>;
