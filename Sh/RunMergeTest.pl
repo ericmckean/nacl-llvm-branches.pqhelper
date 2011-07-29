@@ -74,6 +74,9 @@ $Compile = 0 if (grep { /^-SkipCompile$/i  } @ARGV);
 $DoTest = 0 if (grep { /^-SkipTest$/i } @ARGV);
 $DoSpec = 0 if (grep { /^-SkipSpec$/i } @ARGV);
 
+die "Need to specify env var SPEC_HARNESS" if (! exists $ENV{SPEC_HARNESS});
+my $SpecDir = $ENV{SPEC_HARNESS};
+
 if (grep { /^-FirstRun$/i } @ARGV) {
   print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
   print "FirstRun=1  Clean=1 Compile=1 Download=1\n";
@@ -188,11 +191,12 @@ if ($DoTest) {
 {
   push @SpecTime, "Spec2K run time";
   push @SpecTime, time;
+
   my ($SETUP);
-  my ($SPEC_TESTS) = "176.gcc 254.gap"; # 
-  my ($OFFICIAL) = `(cd ~/Work/cpu2000-redhat64-ia32/; pwd)`;
+  my ($SPEC_TESTS) = "176.gcc 179.art 181.mcf 197.parser 252.eon 254.gap"; # 
+  my ($OFFICIAL) = `(cd ${SpecDir}; pwd)`;
   chomp $OFFICIAL;
-  my @SpecSetUps = qw (SetupPnaclX8664Opt SetupPnaclArmOpt);
+  my @SpecSetUps = qw (SetupPnaclX8632Opt SetupPnaclX8664Opt SetupPnaclArmOpt);
   @SpecSetUps = grep {!/x86/i} @SpecSetUps if (grep { /^-SkipX8664/i } @ARGV );
   @SpecSetUps = grep {!/arm/i} @SpecSetUps if (grep { /^-Skiparm/i } @ARGV );
   print "Running the following SPEC setups ", join(" ", @SpecSetUps), "\n";
