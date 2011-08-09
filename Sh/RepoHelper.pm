@@ -140,7 +140,10 @@ sub MergeOneFile {
     close $Fh;
     &ApplyPatch("${TmpDir}/${Target}.${BaseRevName}.patch", $Target, $TmpDir, "-p1");
   }
-  Shell("kdiff3 ${TmpDir}/${Target} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
+  Shell("cp ${TmpDir}/${Target}  ${TmpDir}/${Target}.${BaseRevName}",
+        "Copy AFTER patching");
+
+  Shell("kdiff3 ${TmpDir}/${Target}.${BaseRevName} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
         "run the merge3");
   &Merge3Post($Target);
   chdir $Orig;
