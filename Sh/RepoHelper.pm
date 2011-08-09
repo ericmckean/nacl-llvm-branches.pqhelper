@@ -118,9 +118,17 @@ sub MergeOneFile {
   my (@MqOrig);
   my ($Patch);
   foreach $Patch (@MqApplied) {
-    Shell("hg cat -R .hg/patches -r $BaseRevName .hg/patches/$Patch -o ${TmpDir}/${Dir}${Patch}.${BaseRevName}",
+    if (grep { /$Patch/x } &Piped("hg manifest -R .hg/patches -r $BaseRevName", 
+				  "See if ${Patch} exits in ${BaseRevName}")) {
+      Shell("hg cat -R .hg/patches -r $BaseRevName .hg/patches/$Patch -o ${TmpDir}/${Dir}${Patch}.${BaseRevName}",
           "Get version $BaseRevName of $Patch");
-    push @MqOrig, "${TmpDir}/${Dir}${Patch}.${BaseRevName}";
+      push @MqOrig, "${TmpDir}/${Dir}${Patch}.${BaseRevName}";
+    } else { 
+      print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+      print "WARNING!!! $Patch does not exist in ${BaseRevName}\n";
+      print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+      Shell("touch ${TmpDir}/${Dir}${Patch}.${BaseRevName}", "creating a fake patch");
+    }
   }
   my (@Chunks);
   foreach $Patch (@MqOrig) {
@@ -134,7 +142,10 @@ sub MergeOneFile {
     close $Fh;
     &ApplyPatch("${TmpDir}/${Target}.${BaseRevName}.patch", $Target, $TmpDir, "-p1");
   }
-  Shell("$ENV{MERGE3TOOL} ${TmpDir}/${Target} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
+  Shell("cp ${TmpDir}/${Target}  ${TmpDir}/${Target}.${BaseRevName}",
+        "Copy AFTER patching");
+
+  Shell("$ENV{MERGETOOL} ${TmpDir}/${Target}.${BaseRevName} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
         "run the merge3");
   &Merge3Post($Target);
   chdir $Orig;
@@ -167,9 +178,18 @@ sub MergeOneFileAlt {
   my (@MqOrig);
   my ($Patch, $i);
   foreach $Patch (@MqApplied) {
-    Shell("hg cat -R .hg/patches -r $BaseRevName .hg/patches/$Patch -o ${TmpDir}/${Dir}${Patch}.${BaseRevName}",
-          "Get version $BaseRevName of $Patch");
-    push @MqOrig, "${TmpDir}/${Dir}${Patch}.${BaseRevName}";
+    if (grep { /$Patch/x } &Piped("hg manifest -R .hg/patches -r $BaseRevName", 
+				  "See if ${Patch} exits in ${BaseRevName}")) {
+
+      Shell("hg cat -R .hg/patches -r $BaseRevName .hg/patches/$Patch -o ${TmpDir}/${Dir}${Patch}.${BaseRevName}",
+	    "Get version $BaseRevName of $Patch");
+      push @MqOrig, "${TmpDir}/${Dir}${Patch}.${BaseRevName}";
+    } else {
+      print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+      print "WARNING!!! $Patch does not exist in ${BaseRevName}\n";
+      print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+      Shell("touch ${TmpDir}/${Dir}${Patch}.${BaseRevName}", "creating a fake patch");
+    }
   }
   my (@PatchesToTarget);
   foreach $Patch (@MqOrig) {
@@ -229,7 +249,7 @@ sub GenTwoPatches {
   my ($TmpDir, $Target, $BaseRevName, $CurrRevName, $PatchesToTargetOrig, $PatchNames) = @_;
   my @Rtn;
   my $_;
-  die "Total of ${\($#{$PatchesToTargetOrig}+1)} diffs against $Target but ${\($#{$PatchNames}+1)} patches!\n"
+  print "Total of ${\($#{$PatchesToTargetOrig}+1)} diffs against $Target but ${\($#{$PatchNames}+1)} patches!\n"
     if ($#{$PatchesToTargetOrig} != $#{$PatchNames});
   my (@PatchIdx) = 0; my($i) =0;
   my (@PatchesToTarget) = grep {
@@ -319,10 +339,12 @@ sub Merge3Loop {
       die "File $Rej does not correspond to an existing file in the repo. Please fix manually\n";
     } else {
       print "THIS IS A .REJ FILE. TWO EDITOR WINDOWS OPENING\n";
-      Shell("$ENV{EDITOR} ${TmpDir}/${Dir}${File}${Suffix}&", "Start edit of ${TmpDir}/${Dir}${File}${Suffix}");
-      Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
-      Shell("mv $Rej ${TmpDir}/${Dir}", "Move reject hunk to Output directory");
+      &Shell("$ENV{EDITOR} ${TmpDir}/${Dir}${File}${Suffix}&", "Start edit of ${TmpDir}/${Dir}${File}${Suffix}");
+      &Shell("mkdir -p ${TmpDir}/${Dir}", "mimic the src directory");
+      &Shell("cp $Rej ${TmpDir}/${Dir}", "Copy reject hunk to Output directory");
       &MergeOneFileAlt($RepoDir, $BaseRevLog, $CurrRevLog, $Target, $TmpDir);
+      &Shell("rm $Rej", "Remove Rejected hunk");
+      
     }
 
     if (0) {
