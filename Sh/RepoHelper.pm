@@ -50,10 +50,10 @@ sub TagRepo {
   print "Tag the repo $RepoRoot with $Tag ? ";
   $ans = <STDIN> if ($ans eq '');
   if ($ans =~ /y(e(s)?)?/i) {
-    Shell("hg qpop -a");
+    Shell("hg qpop -a", "");
     my (%Log) = &GetHgLog($BaseRev);
     my ($RevName) = &GetRevName(%Log);
-    Shell("hg tag -f -l -r $Log{rev} ${RevName}${Tag}");
+    Shell("hg tag -f -l -r $Log{rev} ${RevName}${Tag}", "");
   }
   chdir $Orig;
 }
@@ -145,7 +145,7 @@ sub MergeOneFile {
   Shell("cp ${TmpDir}/${Target}  ${TmpDir}/${Target}.${BaseRevName}",
         "Copy AFTER patching");
 
-  Shell("$ENV{MERGETOOL} ${TmpDir}/${Target}.${BaseRevName} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
+  Shell("$ENV{MERGE3TOOL} ${TmpDir}/${Target}.${BaseRevName} ${TmpDir}/${Target}.${CurrRevName} ${Target}",
         "run the merge3");
   &Merge3Post($Target);
   chdir $Orig;
@@ -362,7 +362,7 @@ sub Merge3Loop {
         Shell("cp ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File}",
               "Copy before patching");
         &ApplyAllPriorChanges("${Dir}$File", $TmpDir, $Dir, $Rej, $BaseRevName);
-        Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File} ${Dir}${File}");
+        Shell("kdiff3 ${TmpDir}/${Dir}${File}.$BaseRevName ${TmpDir}/${Dir}${File} ${Dir}${File}", "");
       } else {
         print "Merging current patch for 1 revision $BaseRevName.\n";
         print "MERGE3 STEP*******************\n";
@@ -685,7 +685,7 @@ sub HgCommitMqRefresh {
   #  if ($ActualRevB4Patch{rev} ne $RevLog{rev});
   #&HgPushLoop(@MqSeries);
   my ($RevName) = &GetRevName(%RevLog);
-  my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a");
+  my (@AllBranches) = grep { chomp } Piped("hg -R .hg/patches branches -a", "");
   my (@MatchingBranches) = grep { /^${RevName}/x } @AllBranches;
   if ($#MatchingBranches >= 0) {
     print "Branch $RevName already exists. Please rename\n";
@@ -941,7 +941,7 @@ sub SaveTestArtifacts() {
   print "$DstDir/$VersionTag\n";
   if (-d "$DstDir/$VersionTag") {
     print "Moving Old Test Results\n";
-    my (@Old) = Piped("ls -1d ${DstDir}/${VersionTag}*");
+    my (@Old) = Piped("ls -1d ${DstDir}/${VersionTag}*", "");
     Shell("mv ${DstDir}/${VersionTag} ${DstDir}/${VersionTag}.old${\($#Old+1)}", "");
   }
   if (1) {
