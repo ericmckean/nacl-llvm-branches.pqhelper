@@ -23,7 +23,7 @@ my $NaCl = `pwd`; chomp $NaCl;
 my ($LLVMRepo, $LLVMGccRepo);
 
 
-$ENV{PQ_REV_NAME_MOD} = Piped("git log | grep git-svn | head -1 | cut -d@ -f2 | sed -e 'print \$1'")   
+$ENV{PQ_REV_NAME_MOD} = Piped("git log | grep git-svn | head -1 | cut -d@ -f2 | sed -e 'print \$1'", "")   
   if (! exists $ENV{PQ_REV_NAME_MOD});
 &SetRevNameMod($ENV{PQ_REV_NAME_MOD});
 print "PQ_REV_NAME_MOD is $ENV{PQ_REV_NAME_MOD}\n";
@@ -128,7 +128,7 @@ sub ReportTime {
 
 if ($Clean) {
   &Shell("./tools/llvm/utman.sh clean", "wipeit");
-  &Shell("gclient sync");
+  &Shell("gclient sync", "SYNC");
 }
 
 if ($Compile) {
@@ -216,7 +216,7 @@ if ($DoTest && $DoSpec) {
   print "SUCCESS WITH REV $LLVMRev\n";
   if ($SaveArtifacts) {
     print "Now saving the artifacts\n";
-    &Shell("save-test-artifacts.pl $CurrRevTxt");
+    &Shell("save-test-artifacts.pl $CurrRevTxt", "");
     &TagRepo($LLVMRepo, $LLVMLog{rev}, "TestAllPassed");
     &TagRepo($LLVMGccRepo, $LLVMGccLog{rev}, "TestAllPassed");
   }

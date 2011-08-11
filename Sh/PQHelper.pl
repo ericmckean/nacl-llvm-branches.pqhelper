@@ -168,7 +168,7 @@ sub InitPatchQueueFromHgExport {
 
   chdir $DstRepo || die "YUK!";
   if ($DstBaseRev ne '') {
-    Shell("hg up -r '$DstBaseRev'");
+    Shell("hg up -r '$DstBaseRev'", "");
   }
   Shell("hg qinit -c", "") if (! -d ".hg/patches/.hg");
 
@@ -391,8 +391,8 @@ sub HgRefreshLoop() {
 sub HgContinueRefresh {
   ## called when a HgRefreshAll has failed and a manual intervention was required
   ## the repo must be clean, esp without any .orig or -rej files
-  my(@MqSeries) = grep { chomp } Piped("hg qseries");
-  my (@MqApplied) = grep { chomp } Piped("hg qapplied");
+  my(@MqSeries) = grep { chomp } Piped("hg qseries", "");
+  my (@MqApplied) = grep { chomp } Piped("hg qapplied", "");
   map { my($x) = shift @MqSeries;
         $x eq $_ || die "hg qapplied does not look like declared qseries!\n";
       } @MqApplied;
@@ -450,7 +450,7 @@ sub HgTrackPatch {
 sub GetPatchedFiles {
   my ($RepoDir) = @_;
   $RepoDir = &GetRepoRoot($RepoDir);
-  my (@Patches) = grep { chomp } Piped("hg qseries");
+  my (@Patches) = grep { chomp } Piped("hg qseries", "");
   chdir $RepoDir;
   chdir ".hg/patches";
   my (@Files) = Piped("egrep -h '^diff ' " . join(" ", @Patches));
