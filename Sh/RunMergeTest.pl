@@ -159,7 +159,7 @@ sub ReportTime {
   close($Script);
   print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
   print "Created helper script $HelperName\n";
-  print "Source it next time if you want to run utman.sh separately\n"
+  print "Source it next time if you want to run utman.sh separately\n";
   print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
 }
 
