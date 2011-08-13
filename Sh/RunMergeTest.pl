@@ -127,6 +127,42 @@ sub ReportTime {
   print "*******************************************************************\n";
 }
 
+{
+  $ENV{LLVM_QPARENT_REV} =     $LLVMLog{rev};
+  $ENV{LLVM_GCC_QPARENT_REV} = $LLVMGccLog{rev};
+  $ENV{LLVM_MQ_REV} =          $LLVMMQRevLog{rev};
+  $ENV{LLVM_GCC_MQ_REV} =      $LLVMGccMQRevLog{rev};
+
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
+  print "LLVM_QPARENT_REV    =$ENV{LLVM_QPARENT_REV} ${\(&GetRevName(%LLVMLog))}\n";
+  print "LLVM_GCC_QPARENT_REV=$ENV{LLVM_GCC_QPARENT_REV} ${\(&GetRevName(%LLVMGccLog))}\n";
+  print "LLVM_MQ_REV         =$ENV{LLVM_MQ_REV} ${\(&GetRevName(%LLVMMQRevLog))}\n";
+  print "LLVM_GCC_MQ_REV     =$ENV{LLVM_GCC_MQ_REV} ${\(&GetRevName(%LLVMGccMQRevLog))}\n";
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
+
+  my $HelperName="utman-set-repo-vers.sh";
+  open(my $Script, ">$HelperName") 
+    || die "Unable to create version data script\n";
+  print $Script "#!/bin/bash\n";
+  print $Script "export PQ_REV_NAME_MOD='$ENV{PQ_REV_NAME_MOD}'\n";
+  print $Script "export LLVM_QPARENT_REV='$ENV{LLVM_QPARENT_REV}'\n";
+  print $Script "export LLVM_GCC_QPARENT_REV='$ENV{LLVM_GCC_QPARENT_REV}'\n";
+  print $Script "export LLVM_MQ_REV='$ENV{LLVM_MQ_REV}'\n";
+  print $Script "export LLVM_GCC_MQ_REV='$ENV{LLVM_GCC_MQ_REV}'\n";
+
+  print $Script 'echo "PQ_REV_NAME_MOD       =$PQ_REV_NAME_MOD"'. "\n";
+  print $Script 'echo "LLVM_QPARENT_REV      =$LLVM_QPARENT_REV"     #' . "${\(&GetRevName(%LLVMLog))}\n";
+  print $Script 'echo "LLVM_GCC_QPARENT_REV  =$LLVM_GCC_QPARENT_REV" #' . "${\(&GetRevName(%LLVMGccLog))}\n";
+  print $Script 'echo "LLVM_MQ_REV           =$LLVM_MQ_REV"          #' . "${\(&GetRevName(%LLVMMQRevLog))}\n";
+  print $Script 'echo "LLVM_GCC_MQ_REV       =$LLVM_GCC_MQ_REV"      #' . "${\(&GetRevName(%LLVMGccMQRevLog))}\n";
+  print $Script "echo remember to source this file. Do not execute it\n";
+  close($Script);
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
+  print "Created helper script $HelperName\n";
+  print "Source it next time if you want to run utman.sh separately\n"
+  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
+}
+
 if ($Clean) {
   &Shell("./tools/llvm/utman.sh clean", "wipeit");
   &Shell("gclient sync", "SYNC");
@@ -141,17 +177,6 @@ if ($Compile) {
   } else {
     $ENV{UTMAN_RESET_MQ}="false";
   }
-  $ENV{LLVM_QPARENT_REV} =     $LLVMLog{rev};
-  $ENV{LLVM_GCC_QPARENT_REV} = $LLVMGccLog{rev};
-  $ENV{LLVM_MQ_REV} =          $LLVMMQRevLog{rev};
-  $ENV{LLVM_GCC_MQ_REV} =      $LLVMMGccQRevLog{rev};
-
-  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";
-  print "LLVM_QPARENT_REV    =$ENV{LLVM_QPARENT_REV} ${\(&GetRevName(%LLVMLog))}\n";
-  print "LLVM_GCC_QPARENT_REV=$ENV{LLVM_GCC_QPARENT_REV} ${\(&GetRevName(%LLVMGccLog))}\n";
-  print "LLVM_MQ_REV         =$ENV{LLVM_MQ_REV} ${\(&GetRevName(%LLVMMQRevLog))}\n";
-  print "LLVM_GCC_MQ_REV     =$ENV{LLVM_GCC_MQ_REV} ${\(&GetRevName(%LLVMMGccQRevLog))}\n";
-  print "++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n";  
 
   &Shell("./tools/llvm/utman.sh show-config", "");
   &Shell("./tools/llvm/utman.sh everything-translator", "do it all");
