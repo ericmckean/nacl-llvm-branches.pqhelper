@@ -913,10 +913,11 @@ sub GetRevName {
     $Rtn = "tag$tmp[0]${RevNameMod}";
   } else {
     # worst case - use the short id
-    @tmp = split(/:/, $Log{rev});
+    print "splitting '$Log{rev}'\n";
+    @tmp = split /:/, $Log{rev};
     $Rtn = "rev$tmp[0]${RevNameMod}";
   }
-  # print "returning $Rtn\n";
+
   return $Rtn;
 }
 
