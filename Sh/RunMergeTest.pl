@@ -73,6 +73,7 @@ $Clean = 1 if  (grep { /^-Clean$/i } @ARGV);
 $Compile = 0 if (grep { /^-SkipCompile$/i  } @ARGV);
 $DoTest = 0 if (grep { /^-SkipTest$/i } @ARGV);
 $DoSpec = 0 if (grep { /^-SkipSpec$/i } @ARGV);
+$Download = 0 if (grep { /^-SkipDownload$/i } @ARGV);
 
 die "Need to specify env var SPEC_HARNESS" if (! exists $ENV{SPEC_HARNESS});
 my $SpecDir = $ENV{SPEC_HARNESS};
